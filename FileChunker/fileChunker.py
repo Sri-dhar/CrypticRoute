@@ -42,7 +42,7 @@ def main():
     output_file = sys.argv[2]
     
     # Get optional chunk size argument
-    chunk_size = 8  # default
+    chunk_size = 22  # default
     if len(sys.argv) >= 4:
         try:
             chunk_size = int(sys.argv[3])

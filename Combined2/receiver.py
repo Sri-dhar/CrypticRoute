@@ -39,35 +39,60 @@ def decrypt_file(encrypted_file, output_file, key):
         print(f"Error during decryption: {str(e)}")
         return False
 
+def is_zero_chunk(data):
+    """Check if the data is all zeros"""
+    return all(byte == 0 for byte in data)
+
 def receive_and_decode_packets(interface, key_file, output_file, count=100, filter_ip=None):
     """
-    Sniff packets with IP options and reconstruct the hidden message.
+    Sniff packets with IP options and reconstruct the hidden message between all-zero markers.
     """
     received_chunks = []
+    collecting = False  # Flag to indicate when to start/stop collecting data
     
     print(f"Sniffing for packets with IP options on {interface}...")
+    print("Waiting for initial all-zero packet to start collection...")
     
     packet_filter = "ip[0] & 0x0f > 5"  # Packets with IP options
     if filter_ip:
         packet_filter += f" and host {filter_ip}"
     
     def extract_options(packet):
+        nonlocal collecting, received_chunks
         if IP in packet and packet[IP].options:
             for option in packet[IP].options:
                 try:
                     if hasattr(option, 'value') and len(option.value) > 4:
                         data = option.value[4:]  # Skip header bytes
-                        hex_chunk = ' '.join(f'{byte:02x}' for byte in data)
-                        received_chunks.append(hex_chunk)
-                        print(f"Received chunk: {hex_chunk}")
+                        
+                        if is_zero_chunk(data):
+                            if not collecting:
+                                print("Received initial all-zero packet. Starting data collection.")
+                                collecting = True
+                            elif collecting and received_chunks:  # Ensure we have data before stopping
+                                print("Received final all-zero packet. Stopping data collection.")
+                                collecting = False
+                                return True  # Signal to stop sniffing
+                        elif collecting:
+                            hex_chunk = ' '.join(f'{byte:02x}' for byte in data)
+                            received_chunks.append(hex_chunk)
+                            print(f"Received chunk: {hex_chunk}")
                 except Exception as e:
                     print(f"  Error parsing option: {e}")
-    
+        return False  # Continue sniffing unless explicitly stopped
+
     try:
-        packets = sniff(iface=interface, filter=packet_filter, prn=extract_options, count=count)
+        # Sniff until stopped by the final zero packet or count is reached
+        packets = sniff(
+            iface=interface,
+            filter=packet_filter,
+            prn=lambda p: extract_options(p),
+            stop_filter=lambda p: extract_options(p),  # Stop when extract_options returns True
+            count=count
+        )
         print(f"Finished sniffing. Captured {len(packets)} packets with IP options.")
         
-        # Reconstruct the encrypted file
+        # Reconstruct the encrypted file if we received any chunks
         if received_chunks:
             received_encrypted = 'received_encrypted.bin'
             with open(received_encrypted, 'wb') as outfile:
@@ -83,6 +108,8 @@ def receive_and_decode_packets(interface, key_file, output_file, count=100, filt
                     print("Decryption failed.")
             except Exception as e:
                 print(f"Decryption error: {e}")
+        else:
+            print("No data chunks received between markers.")
         
         return received_chunks
     except Exception as e:
@@ -90,11 +117,11 @@ def receive_and_decode_packets(interface, key_file, output_file, count=100, filt
         return []
 
 def main():
-    parser = argparse.ArgumentParser(description='Encrypted Steganographic Packet Receiver')
+    parser = argparse.ArgumentParser(description='Encrypted Steganographic Packet Receiver with Zero Markers')
     parser.add_argument('--interface', default='wlo1', help='Network interface to sniff on')
     parser.add_argument('--key-file', default='key.txt', help='Path to decryption key file')
     parser.add_argument('--output-file', default='received_output.txt', help='Path to save decrypted output')
-    parser.add_argument('--count', type=int, default=100, help='Number of packets to capture')
+    parser.add_argument('--count', type=int, default=100, help='Maximum number of packets to capture')
     parser.add_argument('--filter-ip', help='Optional IP address to filter')
     
     args = parser.parse_args()
@@ -107,20 +134,12 @@ def main():
         filter_ip=args.filter_ip
     )
 
-
 def print_port():
     # Create a temporary socket to get the port
     try:
-        # Create a socket object
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        
-        # Bind to port 0 (system assigns a free port)
         sock.bind(('', 0))
-        
-        # Get the port number
         port = sock.getsockname()[1]
-        
-        # Close the socket
         sock.close()
         
         print(f"Program is running on port: {port}")
@@ -129,7 +148,6 @@ def print_port():
     except Exception as e:
         print(f"Error getting port: {e}")
         return None 
-    
 
 if __name__ == "__main__":
     print_port()
