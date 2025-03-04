@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget,
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette, QColor
 
-# Encryption/Chunking functions from combined.py (simplified for integration)
 def read_key_file(key_file):
     try:
         with open(key_file, 'r') as f:
