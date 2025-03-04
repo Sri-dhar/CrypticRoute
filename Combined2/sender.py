@@ -9,12 +9,14 @@ def read_key_file(key_file):
     try:
         with open(key_file, 'r') as f:
             key = f.read().strip()
+        print(f"[KEY] Reading key from {key_file}")
+        print(f"[KEY] Key length: {len(key)} characters")
         return key
     except FileNotFoundError:
-        print(f"Error: Key file '{key_file}' not found")
+        print(f"[ERROR] Key file '{key_file}' not found")
         sys.exit(1)
     except Exception as e:
-        print(f"Error reading key file: {str(e)}")
+        print(f"[ERROR] Error reading key file: {str(e)}")
         sys.exit(1)
 
 def encrypt_file(input_file, encrypted_file, key):
@@ -23,8 +25,11 @@ def encrypt_file(input_file, encrypted_file, key):
         aes_binary = "./aes_encrypt"  # Adjust path as needed
         
         if not os.path.exists(aes_binary):
-            print(f"Error: AES encryption binary not found at {aes_binary}")
+            print(f"[ERROR] AES encryption binary not found at {aes_binary}")
             sys.exit(1)
+        
+        print(f"[ENCRYPT] Encrypting {input_file}")
+        print(f"[ENCRYPT] Input file size: {os.path.getsize(input_file)} bytes")
         
         result = subprocess.run(
             [aes_binary, "-e", input_file, encrypted_file, key],
@@ -32,128 +37,151 @@ def encrypt_file(input_file, encrypted_file, key):
             text=True
         )
         
+        print("[ENCRYPT] AES Binary STDOUT:")
+        print(result.stdout)
+        print("[ENCRYPT] AES Binary STDERR:")
+        print(result.stderr)
+        
         if result.returncode != 0:
-            print(f"Encryption failed: {result.stderr}")
+            print(f"[ERROR] Encryption failed: {result.stderr}")
             sys.exit(1)
         
-        print(f"Successfully encrypted {input_file} to {encrypted_file}")
+        print(f"[ENCRYPT] Successfully encrypted {input_file} to {encrypted_file}")
+        print(f"[ENCRYPT] Encrypted file size: {os.path.getsize(encrypted_file)} bytes")
         return True
     except Exception as e:
-        print(f"Error during encryption: {str(e)}")
+        print(f"[ERROR] Error during encryption: {str(e)}")
         sys.exit(1)
 
 def chunk_file_to_packets(input_file, chunk_size=30):
-    """
-    Reads an encrypted file and splits its contents into packet-sized chunks.
-    
-    Args:
-        input_file (str): Path to the encrypted file
-        chunk_size (int): Size of each chunk for IP options
-        
-    Returns:
-        list: List of packet chunks
-    """
+    """Reads an encrypted file and splits its contents into packet-sized chunks."""
     try:
+        print(f"[CHUNK] Starting file chunking for {input_file}")
+        print(f"[CHUNK] Chunk size: {chunk_size} bytes")
+        
         with open(input_file, 'rb') as infile:
             chunks = []
+            chunk_count = 0
             while True:
                 chunk = infile.read(chunk_size)
                 if not chunk:
                     break
+                
                 hex_chunk = ' '.join(f'{byte:02x}' for byte in chunk)
                 chunks.append(hex_chunk)
+                chunk_count += 1
+                
+                print(f"[CHUNK] Chunk {chunk_count}: {len(chunk)} bytes")
+                print(f"[CHUNK] Hex representation: {hex_chunk}")
         
+        print(f"[CHUNK] Total chunks created: {chunk_count}")
         return chunks
     except FileNotFoundError:
-        print(f"Error: Input file '{input_file}' not found")
+        print(f"[ERROR] Input file '{input_file}' not found")
         sys.exit(1)
     except Exception as e:
-        print(f"An unexpected error occurred during chunking: {str(e)}")
+        print(f"[ERROR] Chunking error: {str(e)}")
         sys.exit(1)
 
-def encode_chunk_to_ip_options(chunk):
-    """
-    Encode a hex chunk into IP options format using the Timestamp option.
-    
-    Args:
-        chunk (str): Hex chunk to encode
-        
-    Returns:
-        bytes: IP options with encoded chunk
-    """
-    data_bytes = bytes.fromhex(chunk)
+def create_zero_packet():
+    """Create a packet with all-zero data in IP options"""
+    zero_data = '00 ' * 30  # 30 bytes of zeros in hex
     opt_type = 0x44  # Timestamp
-    opt_pointer = 5  # Standard value
+    opt_pointer = 5
     opt_overflow_flags = 0
-    opt_len = 4 + len(data_bytes)  # 4 bytes header + data
+    opt_len = 4 + 30  # 4 bytes header + 30 bytes data
     
-    option = bytes([opt_type, opt_len, opt_pointer, opt_overflow_flags]) + data_bytes
-    padding_needed = (4 - (len(option) % 4)) % 4  # Pad to multiple of 4
+    option = bytes([opt_type, opt_len, opt_pointer, opt_overflow_flags]) + bytes.fromhex(zero_data.replace(' ', ''))
+    padding_needed = (4 - (len(option) % 4)) % 4
     if padding_needed > 0:
         option += b'\x00' * padding_needed
+    
+    print(f"[ZERO] Created zero packet with {len(option)} bytes")
+    return option
+
+def encode_chunk_to_ip_options(chunk):
+    """Encode a hex chunk into IP options format using the Timestamp option."""
+    data_bytes = bytes.fromhex(chunk)
+    opt_type = 0x44  # Timestamp
+    opt_pointer = 5
+    opt_overflow_flags = 0
+    opt_len = 4 + len(data_bytes)
+    
+    option = bytes([opt_type, opt_len, opt_pointer, opt_overflow_flags]) + data_bytes
+    padding_needed = (4 - (len(option) % 4)) % 4
+    if padding_needed > 0:
+        option += b'\x00' * padding_needed
+    
+    print(f"[OPTION] Encoded chunk: {len(data_bytes)} bytes")
+    print(f"[OPTION] Option type: {hex(opt_type)}")
+    print(f"[OPTION] Total option length: {opt_len}")
     
     return option
 
 def send_encrypted_chunks(target_ip, port, chunks, cover_data="Normal traffic"):
-    """
-    Send encrypted chunks hidden in IP options of UDP packets.
-    
-    Args:
-        target_ip (str): Target IP address
-        port (int): Destination port
-        chunks (list): List of hex chunks to send
-        cover_data (str): Cover text for packet payload
-    """
+    """Send encrypted chunks with initial and final zero packets."""
     if ":" in target_ip:
-        print("Error: IP Options are only available in IPv4, not IPv6")
+        print("[ERROR] IP Options are only available in IPv4, not IPv6")
         return
     
     try:
-        for i, chunk in enumerate(chunks):
-            option_bytes = encode_chunk_to_ip_options(chunk)
-            
-            # Create IP packet with UDP
-            packet = IP(dst=target_ip, options=IPOption(bytes(option_bytes)))/UDP(dport=port)/Raw(load=f"{cover_data} Packet {i+1}")
-            send(packet, verbose=0)
-            
-            print(f"Sent packet {i+1}/{len(chunks)} with {len(option_bytes)} bytes of option data")
-            print(f"  Data sample: {chunk[:20]}...")
+        print(f"[SEND] Preparing to send to {target_ip}:{port}")
+        total_packets = len(chunks) + 2  # Including initial and final zero packets
+        print(f"[SEND] Total packets to send (including markers): {total_packets}")
         
-        print(f"\nEncrypted steganographic transmission complete.")
+        # Send initial zero packet
+        print("\n[SEND] Sending initial marker packet")
+        zero_option = create_zero_packet()
+        initial_packet = IP(dst=target_ip, options=IPOption(zero_option))/UDP(dport=port)/Raw(load=f"{cover_data} Start Marker")
+        send(initial_packet, verbose=1)
+        print("[SEND] Initial zero packet sent successfully")
+        
+        # Send actual data packets
+        for i, chunk in enumerate(chunks, 1):
+            print(f"\n[SEND] Preparing data packet {i}/{len(chunks)}")
+            option_bytes = encode_chunk_to_ip_options(chunk)
+            packet = IP(dst=target_ip, options=IPOption(option_bytes))/UDP(dport=port)/Raw(load=f"{cover_data} Packet {i}")
+            
+            print(f"[SEND] Packet {i} details:")
+            print(f"  - Destination IP: {target_ip}")
+            print(f"  - Destination Port: {port}")
+            print(f"  - Option bytes length: {len(option_bytes)}")
+            print(f"  - Payload: {cover_data} Packet {i}")
+            
+            send(packet, verbose=1)
+            print(f"[SEND] Data packet {i} sent successfully")
+        
+        # Send final zero packet
+        print("\n[SEND] Sending final marker packet")
+        final_packet = IP(dst=target_ip, options=IPOption(zero_option))/UDP(dport=port)/Raw(load=f"{cover_data} End Marker")
+        send(final_packet, verbose=1)
+        print("[SEND] Final zero packet sent successfully")
+        
+        print(f"\n[SEND] Encrypted steganographic transmission complete.")
     except Exception as e:
-        print(f"Error sending packets: {e}")
+        print(f"[ERROR] Error sending packets: {e}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Encrypted Steganographic Packet Sender')
+    parser = argparse.ArgumentParser(description='Verbose Encrypted Steganographic Packet Sender with Marker Packets')
     parser.add_argument('--input-file', default='input.txt', help='Input file to send')
     parser.add_argument('--key-file', default='key.txt', help='Encryption key file')
     parser.add_argument('--target-ip', required=True, help='Target IP address')
     parser.add_argument('--port', type=int, default=53, help='Destination port')
+    parser.add_argument('--verbose', action='store_true', help='Enable extra verbose output')
     
     args = parser.parse_args()
     
-    # Create temp directory
     temp_dir = 'temp'
     os.makedirs(temp_dir, exist_ok=True)
+    print(f：[INIT] Created temporary directory: {temp_dir}")
     
-    # Paths for temporary files
     encrypted_file = os.path.join(temp_dir, 'encrypted.bin')
+    print(f"[INIT] Encrypted file will be: {encrypted_file}")
     
-    # Read encryption key
     key = read_key_file(args.key_file)
-    
-    # Encrypt input file
     encrypt_file(args.input_file, encrypted_file, key)
-    
-    # Chunk and send packets
     chunks = chunk_file_to_packets(encrypted_file)
     send_encrypted_chunks(args.target_ip, args.port, chunks)
 
 if __name__ == "__main__":
     main()
-    
-    '''## Usage
-
-### Sender
-```bash
-python sender.py --input-file message.txt --target-ip 10.0.0.1 --port 53'''
