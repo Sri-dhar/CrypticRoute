@@ -1,5 +1,6 @@
 import sys
 import os
+import socket
 import subprocess
 import argparse
 from scapy.all import *
@@ -90,7 +91,7 @@ def receive_and_decode_packets(interface, key_file, output_file, count=100, filt
 
 def main():
     parser = argparse.ArgumentParser(description='Encrypted Steganographic Packet Receiver')
-    parser.add_argument('--interface', default='eth0', help='Network interface to sniff on')
+    parser.add_argument('--interface', default='wlo1', help='Network interface to sniff on')
     parser.add_argument('--key-file', default='key.txt', help='Path to decryption key file')
     parser.add_argument('--output-file', default='received_output.txt', help='Path to save decrypted output')
     parser.add_argument('--count', type=int, default=100, help='Number of packets to capture')
@@ -106,7 +107,32 @@ def main():
         filter_ip=args.filter_ip
     )
 
+
+def print_port():
+    # Create a temporary socket to get the port
+    try:
+        # Create a socket object
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        
+        # Bind to port 0 (system assigns a free port)
+        sock.bind(('', 0))
+        
+        # Get the port number
+        port = sock.getsockname()[1]
+        
+        # Close the socket
+        sock.close()
+        
+        print(f"Program is running on port: {port}")
+        return port
+    
+    except Exception as e:
+        print(f"Error getting port: {e}")
+        return None 
+    
+
 if __name__ == "__main__":
+    print_port()
     main()
     
     '''python receiver.py --interface eth0 --output-file received.txt'''
