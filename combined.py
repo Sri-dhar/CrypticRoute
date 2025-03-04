@@ -4,6 +4,8 @@ import subprocess
 import argparse
 import shutil
 
+
+
 def read_key_file(key_file):
     """Read encryption key from a file"""
     try:
