@@ -18,9 +18,9 @@ def read_key_file(key_file):
         sys.exit(1)
 
 def decrypt_file(encrypted_file, output_file, key):
-    """Decrypt the file using the AES decryption binary"""
+    """Decrypt the file using the AES encryption binary"""
     try:
-        aes_binary = "./../AES_withInput/aes_encrypt"
+        aes_binary = "./aes_encrypt"  # Adjust path as needed
         
         result = subprocess.run(
             [aes_binary, "-d", encrypted_file, output_file, key],
@@ -41,13 +41,6 @@ def decrypt_file(encrypted_file, output_file, key):
 def receive_and_decode_packets(interface, key_file, output_file, count=100, filter_ip=None):
     """
     Sniff packets with IP options and reconstruct the hidden message.
-    
-    Args:
-        interface (str): Network interface to sniff on
-        key_file (str): Path to decryption key file
-        output_file (str): Path to save decrypted output
-        count (int): Number of packets to capture
-        filter_ip (str): Optional IP to filter on
     """
     received_chunks = []
     
@@ -97,7 +90,7 @@ def receive_and_decode_packets(interface, key_file, output_file, count=100, filt
 
 def main():
     parser = argparse.ArgumentParser(description='Encrypted Steganographic Packet Receiver')
-    parser.add_argument('--interface', default='wlan0', help='Network interface to sniff on')
+    parser.add_argument('--interface', default='eth0', help='Network interface to sniff on')
     parser.add_argument('--key-file', default='key.txt', help='Path to decryption key file')
     parser.add_argument('--output-file', default='received_output.txt', help='Path to save decrypted output')
     parser.add_argument('--count', type=int, default=100, help='Number of packets to capture')
@@ -105,7 +98,6 @@ def main():
     
     args = parser.parse_args()
     
-    # Attempt to receive and decrypt packets
     receive_and_decode_packets(
         interface=args.interface,
         key_file=args.key_file,
@@ -116,20 +108,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-'''
-
-Key improvements:
-1. More explicit error handling
-2. Separate receiver script for better modularity
-3. Flexible command-line options
-4. Improved logging and feedback
-5. Clearer separation of receiving and decryption steps
-
-Usage example:
-```bash
-# For receiving on eth0, using default key.txt and saving to received_output.txt
-python receiver.py
-
-# With specific options
-python receiver.py --interface wlan0 --key-file mykey.txt --output-file secret.txt --count 50 --filter-ip 192.168.1.100
-'''
+    
+    '''python receiver.py --interface eth0 --output-file received.txt'''
