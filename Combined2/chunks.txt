@@ -1,0 +1,17 @@
+67 c6 69 73
+51 ff 4a ec
+29 cd ba ab
+f2 fb e3 46
+02 01 11 ab
+d7 e3 1f ed
+f5 9e 71 5a
+bb 7d 0a 38
+ad df 37 46
+39 ce 20 38
+f8 0f a7 ec
+55 76 32 dc
+e1 89 1f 85
+15 50 73 44
+83 03 bc 19
+c3 e5 78 90
+ef          
