@@ -47,9 +47,6 @@ def decrypt_message(encrypted_file: str, key: str) -> str:
 def reverse_chunk_file(input_file: str, output_file: str) -> None:
     """Reverse chunk the received data using reverseFileChunker.py."""
     subprocess.run(['python', 'reverseFileChunker.py', input_file, output_file], check=True)
-    with open('receiver_reversed_output.txt', 'a') as f:
-        with open(output_file, 'r') as reversed_f:
-            f.write(f"Reversed data in {output_file}:\n{reversed_f.read()}\n")
 
 def receive_packets(interface: str, src_ip: str, dst_ip: str, port: int, start_bits: str, end_bits: str) -> list:
     """Receive and filter UDP packets based on IPs and port."""
