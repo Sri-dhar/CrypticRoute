@@ -125,6 +125,15 @@ def send_encrypted_chunks(target_ip, port, chunks, cover_data="Normal traffic"):
         return
     
     try:
+        print(f"[SEND] Network Interface Details:")
+        # Get network interface details
+        import subprocess
+        interface_output = subprocess.check_output(["ip", "route"]).decode()
+        print(interface_output)
+        
+        print(f"[SEND] Local IP Address:")
+        local_ip_output = subprocess.check_output(["hostname", "-I"]).decode()
+        print(local_ip_output)
         print(f"[SEND] Preparing to send to {target_ip}:{port}")
         total_packets = len(chunks) + 2  # Including initial and final zero packets
         print(f"[SEND] Total packets to send (including markers): {total_packets}")
@@ -133,7 +142,7 @@ def send_encrypted_chunks(target_ip, port, chunks, cover_data="Normal traffic"):
         print("\n[SEND] Sending initial marker packet")
         zero_option = create_zero_packet()
         initial_packet = IP(dst=target_ip, options=IPOption(zero_option))/UDP(dport=port)/Raw(load=f"{cover_data} Start Marker")
-        send(initial_packet, verbose=1)
+        send(initial_packet, verbose=0)  # verbose=0 to reduce extra output
         print("[SEND] Initial zero packet sent successfully")
         
         # Send actual data packets
@@ -148,18 +157,22 @@ def send_encrypted_chunks(target_ip, port, chunks, cover_data="Normal traffic"):
             print(f"  - Option bytes length: {len(option_bytes)}")
             print(f"  - Payload: {cover_data} Packet {i}")
             
-            send(packet, verbose=1)
+            send(packet, verbose=0)  # verbose=0 to reduce extra output
             print(f"[SEND] Data packet {i} sent successfully")
         
         # Send final zero packet
         print("\n[SEND] Sending final marker packet")
         final_packet = IP(dst=target_ip, options=IPOption(zero_option))/UDP(dport=port)/Raw(load=f"{cover_data} End Marker")
-        send(final_packet, verbose=1)
+        send(final_packet, verbose=0)  # verbose=0 to reduce extra output
         print("[SEND] Final zero packet sent successfully")
         
         print(f"\n[SEND] Encrypted steganographic transmission complete.")
+    except PermissionError:
+        print("[ERROR] Permission denied: Run the script with sudo/admin privileges.")
+        sys.exit(1)
     except Exception as e:
         print(f"[ERROR] Error sending packets: {e}")
+        sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser(description='Verbose Encrypted Steganographic Packet Sender with Marker Packets')
@@ -173,7 +186,7 @@ def main():
     
     temp_dir = 'temp'
     os.makedirs(temp_dir, exist_ok=True)
-    print(f：[INIT] Created temporary directory: {temp_dir}")
+    print(f"[INIT] Created temporary directory: {temp_dir}")
     
     encrypted_file = os.path.join(temp_dir, 'encrypted.bin')
     print(f"[INIT] Encrypted file will be: {encrypted_file}")

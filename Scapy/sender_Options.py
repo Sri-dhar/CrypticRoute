@@ -128,6 +128,21 @@ def receive_and_decode_packets(interface, count=10, filter_ip=None):
     
     # Function to process each captured packet
     def extract_options(packet):
+        print(packet.summary())
+        # Print the options field of packets
+        if IP in packet and packet[IP].options:
+            print(f"Packet from {packet[IP].src} to {packet[IP].dst}")
+            for option in packet[IP].options:
+                try:
+                    # Try to extract data from option (assuming timestamp option format)
+                    if hasattr(option, 'value') and len(option.value) > 4:
+                        data = option.value[4:]  # Skip the header bytes
+                    try:
+                        print(f"  Decoded: {data.decode('utf-8', errors='replace')}")
+                    except:
+                        print(f"  Raw data: {data}")
+                except Exception as e:
+                    print(f"  Error parsing option: {e}")
         if IP in packet and packet[IP].options:
             print(f"Packet from {packet[IP].src} to {packet[IP].dst}")
             for option in packet[IP].options:
@@ -149,13 +164,31 @@ def receive_and_decode_packets(interface, count=10, filter_ip=None):
     except Exception as e:
         print(f"Error sniffing packets: {e}")
 
+def print_port():
+    # Create a temporary socket to get the port
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('', 0))
+        port = sock.getsockname()[1]
+        sock.close()
+        
+        print(f"Program is running on port: {port}")
+        return port
+    
+    except Exception as e:
+        print(f"Error getting port: {e}")
+        return None 
+
 if __name__ == "__main__":
+    
+    print_port()
+    
     # Default values
-    target_ip = "192.168.242.241"  # Replace with your target IP
+    target_ip = "127.0.0.1"  # Replace with your target IP
     target_port = 20             # Replace with your target port
     secret_message = "This is a hidden message using IP options steganography. Much more data can be hidden this way compared to TTL."
     mode = "send"                # "send" or "receive"
-    interface = "eth0"           # For receive mode
+    interface = "wlan0"           # For receive mode
     
     # Command line usage (optional)
     if len(sys.argv) >= 2:
