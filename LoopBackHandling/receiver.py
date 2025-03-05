@@ -47,7 +47,7 @@ def decrypt_message(encrypted_file: str, key: str) -> str:
     try:
         return decrypted_data.decode('utf-8')
     except UnicodeDecodeError:
-        return decrypted_data.decode('latin1')  # Or return bytes if text isn’t needed
+        return decrypted_data #.decode('latin1')  # Or return bytes if text isn’t needed
 
 def reverse_chunk_file(input_file: str, output_file: str) -> None:
     """Reverse chunk the received data using reverseFileChunker.py."""
@@ -74,7 +74,7 @@ def receive_packets(interface: str, src_ip: str, dst_ip: str, port: int, start_b
     
     for packet in packets:
         if packet.haslayer(Raw):
-            data = packet[Raw].load.decode('latin1')
+            data = packet[Raw].load #.decode('latin1')
             with open('receiver_packet_output.txt', 'a') as f:
                 f.write(f"Received packet: src={packet[IP].src}, dst={packet[IP].dst}, data={data}\n")
             if data == start_bits and not connection_established:
