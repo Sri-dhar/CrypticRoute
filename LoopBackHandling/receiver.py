@@ -38,16 +38,11 @@ def get_bits(hash_str: str, start: int, length: int) -> str:
 def decrypt_message(encrypted_file: str, key: str) -> str:
     """Decrypt the data using AES binary."""
     subprocess.run(['./aes_encrypt', '-d', encrypted_file, 'decrypted_temp.txt', key], check=True)
-    # Read as binary to avoid UTF-8 decoding issues, then decode as latin1 if needed
     with open('decrypted_temp.txt', 'rb') as f:
         decrypted_data = f.read()
     with open('receiver_decryption_output.txt', 'a') as f:
-        f.write(f"Decrypted data (raw bytes): {decrypted_data}\n")
-    # Try to decode as UTF-8, fallback to raw bytes if it fails
-    try:
-        return decrypted_data.decode('utf-8')
-    except UnicodeDecodeError:
-        return decrypted_data #.decode('latin1')  # Or return bytes if text isn’t needed
+        f.write(f"Decrypted data (raw bytes): {decrypted_data.hex()}\n")
+    return decrypted_data.decode('utf-8')  # Assuming plaintext is UTF-8
 
 def reverse_chunk_file(input_file: str, output_file: str) -> None:
     """Reverse chunk the received data using reverseFileChunker.py."""
@@ -74,7 +69,7 @@ def receive_packets(interface: str, src_ip: str, dst_ip: str, port: int, start_b
     
     for packet in packets:
         if packet.haslayer(Raw):
-            data = packet[Raw].load #.decode('latin1')
+            data = packet[Raw].load.decode('utf-8')  # Decode as UTF-8 since sender sends strings
             with open('receiver_packet_output.txt', 'a') as f:
                 f.write(f"Received packet: src={packet[IP].src}, dst={packet[IP].dst}, data={data}\n")
             if data == start_bits and not connection_established:
@@ -84,7 +79,7 @@ def receive_packets(interface: str, src_ip: str, dst_ip: str, port: int, start_b
                 print("Connection ended")
                 break
             elif connection_established and data != start_bits and data != end_bits:
-                chunks.append(data)  # Append all data packets after connection is established
+                chunks.append(data)  # Append hex string directly
     
     return chunks
 

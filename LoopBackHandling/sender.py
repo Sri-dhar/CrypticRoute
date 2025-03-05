@@ -13,12 +13,12 @@ def read_file(file_path: str) -> str:
         f.write(f"Read from {file_path}: {content}\n")
     return content
 
-def write_to_file(file_path: str, data: str) -> None:
-    """Write data to a file."""
-    with open(file_path, 'w') as file:
+def write_to_file(file_path: str, data: bytes) -> None:
+    """Write binary data to a file."""
+    with open(file_path, 'wb') as file:
         file.write(data)
     with open('sender_write_output.txt', 'a') as f:
-        f.write(f"Wrote to {file_path}: {data}\n")
+        f.write(f"Wrote to {file_path}: {data.hex()}\n")
 
 def compute_hash(key: str) -> str:
     """Compute SHA256 hash of the key."""
@@ -37,12 +37,13 @@ def get_bits(hash_str: str, start: int, length: int) -> str:
 
 def encrypt_message(message: str, key: str) -> bytes:
     """Encrypt the message using AES binary."""
-    write_to_file('message_temp.txt', message)
+    with open('message_temp.txt', 'w') as f:
+        f.write(message)
     subprocess.run(['./aes_encrypt', '-e', 'message_temp.txt', 'encrypted_temp.txt', key], check=True)
     with open('encrypted_temp.txt', 'rb') as f:
         encrypted_data = f.read()
     with open('sender_encryption_output.txt', 'a') as f:
-        f.write(f"Encrypted data (raw bytes): {encrypted_data}\n")
+        f.write(f"Encrypted data (raw bytes): {encrypted_data.hex()}\n")
     return encrypted_data
 
 def chunk_file(input_file: str, output_file: str, chunk_size: int) -> None:
@@ -82,12 +83,12 @@ def main():
 
     # Encrypt the message
     encrypted_data = encrypt_message(message, key)
-    write_to_file('encrypted_data.txt', encrypted_data) #.decode('latin1')
+    write_to_file('encrypted_data.txt', encrypted_data)  # Write as raw bytes
 
     # Chunk the encrypted data
     chunk_file('encrypted_data.txt', 'chunked_output.txt', chunk_size)
 
-    # Read chunks
+    # Read chunks (hex strings)
     with open('chunked_output.txt', 'r') as f:
         chunks = [chunk.strip() for chunk in f.readlines()]
 
