@@ -59,11 +59,16 @@ def receive_and_decode_packets(interface, key_file, output_file, count=100, filt
     
     def extract_options(packet):
         nonlocal collecting, received_chunks
+        print(f"[DEBUG] Packet received: {packet.summary()}")
+        
         if IP in packet and packet[IP].options:
+            print(f"[DEBUG] IP Options found: {packet[IP].options}")
             for option in packet[IP].options:
                 try:
+                    print(f"[DEBUG] Option details: {option}")
                     if hasattr(option, 'value') and len(option.value) > 4:
                         data = option.value[4:]  # Skip header bytes
+                        print(f"[DEBUG] Option data: {data.hex()}")
                         
                         if is_zero_chunk(data):
                             if not collecting:
@@ -72,14 +77,14 @@ def receive_and_decode_packets(interface, key_file, output_file, count=100, filt
                             elif collecting and received_chunks:  # Ensure we have data before stopping
                                 print("Received final all-zero packet. Stopping data collection.")
                                 collecting = False
-                                return True  # Signal to stop sniffing
+                                return True
                         elif collecting:
                             hex_chunk = ' '.join(f'{byte:02x}' for byte in data)
                             received_chunks.append(hex_chunk)
                             print(f"Received chunk: {hex_chunk}")
                 except Exception as e:
-                    print(f"  Error parsing option: {e}")
-        return False  # Continue sniffing unless explicitly stopped
+                    print(f"[DEBUG] Error parsing option: {e}")
+        return False
 
     try:
         # Sniff until stopped by the final zero packet or count is reached
@@ -118,7 +123,7 @@ def receive_and_decode_packets(interface, key_file, output_file, count=100, filt
 
 def main():
     parser = argparse.ArgumentParser(description='Encrypted Steganographic Packet Receiver with Zero Markers')
-    parser.add_argument('--interface', default='wlo1', help='Network interface to sniff on')
+    parser.add_argument('--interface', default='wlan0', help='Network interface to sniff on')
     parser.add_argument('--key-file', default='key.txt', help='Path to decryption key file')
     parser.add_argument('--output-file', default='received_output.txt', help='Path to save decrypted output')
     parser.add_argument('--count', type=int, default=100, help='Maximum number of packets to capture')
@@ -153,4 +158,4 @@ if __name__ == "__main__":
     print_port()
     main()
     
-    '''python receiver.py --interface eth0 --output-file received.txt'''
+    '''python receiver.py --interface wlan0 --output-file received.txt'''
