@@ -82,10 +82,10 @@ def main():
 
     # Encrypt the message
     encrypted_data = encrypt_message(message, key)
-    write_to_file('encrypted_data.txt', encrypted_data.decode('latin1'))
+    write_to_file('encrypted_temp.txt', encrypted_data.decode('latin1'))
 
     # Chunk the encrypted data
-    chunk_file('encrypted_data.txt', 'chunked_output.txt', chunk_size)
+    chunk_file('encrypted_temp.txt', 'chunked_output.txt', chunk_size)
 
     # Read chunks
     with open('chunked_output.txt', 'r') as f:
