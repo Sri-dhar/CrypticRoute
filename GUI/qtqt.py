@@ -1627,7 +1627,7 @@ class SplashScreen(QWidget):
         logo_label.setAlignment(Qt.AlignCenter)
         
         # Application name
-        app_name = QLabel("StealthData")
+        app_name = QLabel("CrypticRoute")
         app_name.setStyleSheet("""
             QLabel {
                 color: white;
