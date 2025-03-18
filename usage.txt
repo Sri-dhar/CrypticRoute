@@ -1,5 +1,3 @@
-# Sender
-sudo python sender.py -t 192.168.190.241 -i AES_Library_With_Chunker/input.txt -k AES_Library_With_Chunker/key.txt --delay 0.5
+sudo python3 stealth_sender.py --target 192.168.190.241 --input AES_Library_With_Chunker/input.txt --key AES_Library_With_Chunker/key.txt --delay 0.1
 
-# Receiver
-sudo python receiver.py --output output.txt -k AES_Library_With_Chunker/key.txt
+sudo python3 stealth_receiver.py --output received.txt --key AES_Library_With_Chunker/key.txt
