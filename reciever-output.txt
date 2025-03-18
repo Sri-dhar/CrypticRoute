@@ -1,0 +1,61 @@
+Reading decryption key from: AES_Library_With_Chunker/key.txt
+Converted hex key string to bytes
+Listening for steganographic data on interface default...
+Press Ctrl+C to stop listening
+False
+False
+False
+False
+False
+False
+Received 1 chunks so far
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+False
+Received transmission complete signal
+True
+
+Reception summary:
+- Received 5 chunks in 3.37 seconds
+- Highest sequence number seen: 8
+- Packet reception rate: 62.5%
+- Missing approximately 3 chunks
+Reassembling data...
+Warning: Missing 3 chunks: [1, 4, 7]...
+Reassembled 27 bytes of data
+Warning: Data integrity check failed - checksums don't match
+Expected: 0c19e2942aca0f86205c987df4647084
+Received: 7ddc27f3403049e9d0288eb7965a0128
+Warning: Proceeding with unverified data
+Decrypting data...
+Successfully decrypted 11 bytes
+Decrypted data is not text/UTF-8
+Data saved to received.txt
