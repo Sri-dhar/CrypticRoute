@@ -1,0 +1,18 @@
+Reading key file: AES_Library_With_Chunker/key.txt
+Listening for steganographic data on interface wlo1...
+Using filter: icmp
+Press Ctrl+C to stop listening prematurely
+Detected transmission with 6 total chunks
+Progress: 6/6 chunks received (100.0%)
+
+Received all 6 chunks in 0.19 seconds!
+True
+Progress: 6/6 chunks received (100.0%)
+
+Received all 6 chunks in 0.19 seconds!
+Received 6 chunks in total
+Reassembling data...
+Successfully reassembled 48 bytes
+Decrypting data...
+Successfully decrypted 32 bytes
+Data saved to output.txt
