@@ -1,6 +1,0 @@
-67 ef bf bd 69 73 51 ef bf bd 4a ef bf bd 29 cd ba ef bf bd ef bf
-bd ef bf bd ef bf bd 46 04 0c ef bf bd ef bf bd ef bf bd 7c ef bf
-bd ef bf bd 62 ef bf bd ef bf bd 1f ef bf bd ef bf bd ef bf bd 2c
-ef bf bd ef bf bd ef bf bd 73 ef bf bd 0c de 8e 38 03 5a ef bf bd
-ef bf bd ef bf bd ef bf bd 57 ef bf bd ef bf bd 48 ef bf bd 6b ef
-bf bd 64 64 ef bf bd ef bf bd 61 ef bf bd 22 ef bf bd 11 51       

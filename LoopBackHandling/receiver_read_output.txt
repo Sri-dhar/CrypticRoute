@@ -1,3 +1,0 @@
-Read from key.txt: mysecretkey
-Read from key.txt: mysecretkey
-Read from key.txt: mysecretkey
