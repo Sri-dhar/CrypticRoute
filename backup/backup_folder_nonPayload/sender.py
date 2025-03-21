@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 CrypticRoute - Simplified Network Steganography Sender
+With organized file output structure
 """
 
 import sys
@@ -11,6 +12,7 @@ import random
 import hashlib
 import json
 import binascii
+import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from scapy.all import IP, TCP, send, conf
@@ -22,8 +24,52 @@ conf.verb = 0
 MAX_CHUNK_SIZE = 8
 RETRANSMIT_ATTEMPTS = 5
 
+# Output directory structure
+OUTPUT_DIR = "stealth_output"
+SESSION_DIR = ""  # Will be set based on timestamp
+LOGS_DIR = ""     # Will be set based on session dir
+DATA_DIR = ""     # Will be set based on session dir
+CHUNKS_DIR = ""   # Will be set based on session dir
+
 # Debug log file
-DEBUG_LOG = "sender_debug.log"
+DEBUG_LOG = ""  # Will be set based on logs dir
+
+def setup_directories():
+    """Create organized directory structure for outputs."""
+    global OUTPUT_DIR, SESSION_DIR, LOGS_DIR, DATA_DIR, CHUNKS_DIR, DEBUG_LOG
+    
+    # Create main output directory if it doesn't exist
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+    
+    # Create a timestamped session directory
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    SESSION_DIR = os.path.join(OUTPUT_DIR, f"sender_session_{timestamp}")
+    os.makedirs(SESSION_DIR)
+    
+    # Create subdirectories
+    LOGS_DIR = os.path.join(SESSION_DIR, "logs")
+    DATA_DIR = os.path.join(SESSION_DIR, "data")
+    CHUNKS_DIR = os.path.join(SESSION_DIR, "chunks")
+    
+    os.makedirs(LOGS_DIR)
+    os.makedirs(DATA_DIR)
+    os.makedirs(CHUNKS_DIR)
+    
+    # Set debug log path
+    DEBUG_LOG = os.path.join(LOGS_DIR, "sender_debug.log")
+    
+    # Create a symlink to the latest session for convenience
+    latest_link = os.path.join(OUTPUT_DIR, "sender_latest")
+    if os.path.exists(latest_link):
+        if os.path.islink(latest_link):
+            os.unlink(latest_link)
+        else:
+            os.rename(latest_link, f"{latest_link}_{int(time.time())}")
+    
+    os.symlink(SESSION_DIR, latest_link)
+    
+    print(f"Created output directory structure at: {SESSION_DIR}")
 
 def log_debug(message):
     """Write debug message to log file."""
@@ -40,9 +86,11 @@ class SteganographySender:
         self.source_port = random.randint(10000, 60000)
         
         # Create debug file
-        with open("sent_chunks.json", "w") as f:
+        chunks_json = os.path.join(LOGS_DIR, "sent_chunks.json")
+        with open(chunks_json, "w") as f:
             f.write("{}")
         self.sent_chunks = {}
+        self.chunks_json_path = chunks_json
 
     def log_chunk(self, seq_num, data):
         """Save chunk data to debug file."""
@@ -51,8 +99,13 @@ class SteganographySender:
             "size": len(data),
             "timestamp": time.time()
         }
-        with open("sent_chunks.json", "w") as f:
+        with open(self.chunks_json_path, "w") as f:
             json.dump(self.sent_chunks, f, indent=2)
+        
+        # Also save the raw chunk data
+        chunk_file = os.path.join(CHUNKS_DIR, f"chunk_{seq_num:03d}.bin")
+        with open(chunk_file, "wb") as f:
+            f.write(data)
     
     def create_packet(self, data, seq_num, total_chunks):
         """Create a TCP packet with embedded data."""
@@ -145,6 +198,11 @@ def prepare_key(key_data):
     key_data = key_data[:32]
     log_debug(f"Final key: {key_data.hex()}")
     
+    # Save key for debugging
+    key_file = os.path.join(DATA_DIR, "key.bin")
+    with open(key_file, "wb") as f:
+        f.write(key_data)
+    
     return key_data
 
 def encrypt_data(data, key):
@@ -154,6 +212,11 @@ def encrypt_data(data, key):
         iv = b'\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F\x10'
         log_debug(f"Using IV: {iv.hex()}")
         
+        # Save IV for debugging
+        iv_file = os.path.join(DATA_DIR, "iv.bin")
+        with open(iv_file, "wb") as f:
+            f.write(iv)
+        
         # Initialize AES cipher with key and IV
         cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
         encryptor = cipher.encryptor()
@@ -162,10 +225,17 @@ def encrypt_data(data, key):
         encrypted_data = encryptor.update(data) + encryptor.finalize()
         
         # Save original and encrypted data for debugging
-        with open("original_data.bin", "wb") as f:
+        original_file = os.path.join(DATA_DIR, "original_data.bin")
+        with open(original_file, "wb") as f:
             f.write(data)
         
-        with open("encrypted_data.bin", "wb") as f:
+        encrypted_file = os.path.join(DATA_DIR, "encrypted_data.bin")
+        with open(encrypted_file, "wb") as f:
+            f.write(encrypted_data)
+            
+        # Save a complete package (IV + encrypted data) for debugging
+        package_file = os.path.join(DATA_DIR, "encrypted_package.bin")
+        with open(package_file, "wb") as f:
             f.write(iv + encrypted_data)
             
         log_debug(f"Original data: {data.hex() if len(data) <= 32 else data[:32].hex() + '...'}")
@@ -185,7 +255,8 @@ def chunk_data(data, chunk_size=MAX_CHUNK_SIZE):
     
     # Save chunk details for debugging
     chunk_info = {i+1: {"size": len(chunk), "data": chunk.hex()} for i, chunk in enumerate(chunks)}
-    with open("chunks.json", "w") as f:
+    chunks_json = os.path.join(LOGS_DIR, "chunks_info.json")
+    with open(chunks_json, "w") as f:
         json.dump(chunk_info, f, indent=2)
         
     return chunks
@@ -195,6 +266,19 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     # Initialize debug log
     with open(DEBUG_LOG, "w") as f:
         f.write(f"=== CrypticRoute Sender Session: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    
+    # Create a summary file with transmission parameters
+    summary = {
+        "timestamp": time.time(),
+        "file_path": file_path,
+        "target_ip": target_ip,
+        "key_path": key_path,
+        "chunk_size": chunk_size,
+        "delay": delay
+    }
+    summary_path = os.path.join(LOGS_DIR, "session_summary.json")
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
     
     # Read the input file
     log_debug(f"Reading file: {file_path}")
@@ -206,6 +290,11 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     try:
         text_content = file_data.decode('utf-8')
         log_debug(f"File content (as text): {text_content}")
+        
+        # Save the text content as a text file
+        text_file = os.path.join(DATA_DIR, "original_content.txt")
+        with open(text_file, "w") as f:
+            f.write(text_content)
     except UnicodeDecodeError:
         log_debug(f"File content (as hex): {file_data.hex()}")
     
@@ -225,14 +314,19 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     # Add a simple checksum to verify integrity
     file_checksum = hashlib.md5(file_data).digest()
     log_debug(f"Generated MD5 checksum: {file_checksum.hex()}")
-    file_data = file_data + file_checksum
+    file_data_with_checksum = file_data + file_checksum
     
-    # Save the final data package for debugging
-    with open("final_data_package.bin", "wb") as f:
-        f.write(file_data)
+    # Save the checksum and final data package for debugging
+    checksum_file = os.path.join(DATA_DIR, "md5_checksum.bin")
+    with open(checksum_file, "wb") as f:
+        f.write(file_checksum)
+        
+    final_package_file = os.path.join(DATA_DIR, "final_data_package.bin")
+    with open(final_package_file, "wb") as f:
+        f.write(file_data_with_checksum)
     
     # Chunk the data
-    chunks = chunk_data(file_data, chunk_size)
+    chunks = chunk_data(file_data_with_checksum, chunk_size)
     total_chunks = len(chunks)
     log_debug(f"File split into {total_chunks} chunks")
     print(f"File split into {total_chunks} chunks")
@@ -286,6 +380,19 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     
     log_debug("Transmission complete!")
     print("Transmission complete!")
+    
+    # Save session completion info
+    completion_info = {
+        "completed_at": time.time(),
+        "total_chunks_sent": total_chunks,
+        "status": "completed"
+    }
+    completion_path = os.path.join(LOGS_DIR, "completion_info.json")
+    with open(completion_path, "w") as f:
+        json.dump(completion_info, f, indent=2)
+    
+    print(f"All session data saved to: {SESSION_DIR}")
+    
     return True
 
 def parse_arguments():
@@ -297,12 +404,19 @@ def parse_arguments():
     parser.add_argument('--delay', '-d', type=float, default=0.1, help='Delay between packets in seconds (default: 0.1)')
     parser.add_argument('--chunk-size', '-c', type=int, default=MAX_CHUNK_SIZE, 
                         help=f'Chunk size in bytes (default: {MAX_CHUNK_SIZE})')
+    parser.add_argument('--output-dir', '-o', help='Custom output directory')
     return parser.parse_args()
 
 def main():
     """Main function."""
     # Parse arguments
     args = parse_arguments()
+    
+    # Setup output directory structure
+    global OUTPUT_DIR
+    if args.output_dir:
+        OUTPUT_DIR = args.output_dir
+    setup_directories()
     
     # Adjust chunk size if needed
     chunk_size = min(args.chunk_size, MAX_CHUNK_SIZE)
