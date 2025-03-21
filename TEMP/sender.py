@@ -59,15 +59,26 @@ def setup_directories():
     # Set debug log path
     DEBUG_LOG = os.path.join(LOGS_DIR, "sender_debug.log")
     
-    # Create a symlink to the latest session for convenience
+    # Create or update symlink to the latest session for convenience
     latest_link = os.path.join(OUTPUT_DIR, "sender_latest")
-    if os.path.exists(latest_link):
+    
+    # More robust handling of existing symlink
+    try:
+        # Remove existing symlink if it exists
         if os.path.islink(latest_link):
             os.unlink(latest_link)
-        else:
-            os.rename(latest_link, f"{latest_link}_{int(time.time())}")
-    
-    os.symlink(SESSION_DIR, latest_link)
+        # If it's a regular file or directory, rename it
+        elif os.path.exists(latest_link):
+            backup_name = f"{latest_link}_{int(time.time())}"
+            os.rename(latest_link, backup_name)
+            print(f"Renamed existing file to {backup_name}")
+            
+        # Create new symlink
+        os.symlink(SESSION_DIR, latest_link)
+        print(f"Created symlink: {latest_link} -> {SESSION_DIR}")
+    except Exception as e:
+        print(f"Warning: Could not create symlink: {e}")
+        # Continue without the symlink - this is not critical
     
     print(f"Created output directory structure at: {SESSION_DIR}")
 
