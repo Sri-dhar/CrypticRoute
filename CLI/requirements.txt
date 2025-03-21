@@ -1,0 +1,5 @@
+PyQt5>=5.15.0
+scapy>=2.4.5
+cryptography>=3.4.0
+netifaces>=0.11.0
+psutil>=5.9.0
