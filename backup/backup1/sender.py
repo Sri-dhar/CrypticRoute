@@ -88,9 +88,7 @@ def embed_in_ipv4(chunk, target_ip, sequence_num, total_chunks):
     
     return packet
 
-def send_steganographic_data(data, target_ip, chunk_size=8, delay=0.05):
-    """Encrypt, chunk, and send data via IPv4 steganography."""
-    # Chunk the encrypted data
+def send_steganographic_data(data, target_ip, chunk_size=8, delay=0.05, iface=None):
     chunks = chunk_data(data, chunk_size)
     total_chunks = len(chunks)
     
@@ -100,57 +98,39 @@ def send_steganographic_data(data, target_ip, chunk_size=8, delay=0.05):
     
     print(f"Sending {total_chunks} chunks to {target_ip}...")
     
-    # Send each chunk in a separate packet
     for i, chunk in enumerate(chunks):
-        # Sequence number starts at 1
         seq_num = i + 1
-        
-        # Create and send the packet
         packet = embed_in_ipv4(chunk, target_ip, seq_num, total_chunks)
-        send(packet)
+        send(packet, iface=iface)  # Specify the interface
         
-        # Print progress
         if (i + 1) % 50 == 0 or i + 1 == total_chunks:
             print(f"Progress: {i + 1}/{total_chunks} chunks sent")
-        
-        # Add delay between packets to avoid flooding
         time.sleep(delay)
     
-    # Send end marker packet
     end_marker = IP(dst=target_ip, id=0xFFFF, tos=0xFF) / ICMP() / Raw(load=b"ENDMARKER")
-    send(end_marker)
+    send(end_marker, iface=iface)  # Specify the interface for end marker
     
     return True
 
 def parse_arguments():
-    """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='CrypticRoute - Network Steganography Sender')
     parser.add_argument('--target', '-t', required=True, help='Target IP address')
     parser.add_argument('--input', '-i', required=True, help='Input file to send')
     parser.add_argument('--key', '-k', required=True, help='Encryption key file')
     parser.add_argument('--chunk-size', '-c', type=int, default=8, help='Chunk size in bytes (default: 8)')
     parser.add_argument('--delay', '-d', type=float, default=0.05, help='Delay between packets in seconds (default: 0.05)')
+    parser.add_argument('--interface', '-if', help='Network interface to use (e.g., eth0)')
     return parser.parse_args()
 
 def main():
-    """Main function."""
     args = parse_arguments()
-    
-    # Read input file
     print(f"Reading input file: {args.input}")
     input_data = read_file(args.input, 'rb')
     print(f"Read {len(input_data)} bytes")
     
-    # For text files, make sure we're working with bytes
-    if isinstance(input_data, str):
-        input_data = input_data.encode('utf-8')
-    
-    # Read encryption key
     print(f"Reading key file: {args.key}")
     key = read_key(args.key)
     
-    # For compatibility with the provided AES_Library_With_Chunker code
-    # Check if key is a hex string and convert if needed
     if all(c in '0123456789abcdefABCDEF' for c in key.decode('ascii', errors='ignore')):
         try:
             key = bytes.fromhex(key.decode('ascii'))
@@ -158,17 +138,16 @@ def main():
         except Exception as e:
             print(f"Warning: Failed to convert key as hex: {e}")
     
-    # Encrypt the data
     print("Encrypting data...")
     encrypted_data = encrypt(input_data, key)
     print(f"Data encrypted, total size: {len(encrypted_data)} bytes")
     
-    # Send the encrypted data via IPv4 steganography
     success = send_steganographic_data(
-        encrypted_data, 
-        args.target, 
+        encrypted_data,
+        args.target,
         chunk_size=args.chunk_size,
-        delay=args.delay
+        delay=args.delay,
+        iface=args.interface  # Pass the interface
     )
     
     if success:
