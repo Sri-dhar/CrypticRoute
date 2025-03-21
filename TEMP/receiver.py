@@ -309,76 +309,76 @@ def decrypt_data(data, key):
         print(f"Decryption error: {e}")
         return None
 
-def reassemble_data():
-    """Reassemble the received chunks in correct order."""
-    global received_chunks
+# def reassemble_data():
+#     """Reassemble the received chunks in correct order."""
+#     global received_chunks
     
-    if not received_chunks:
-        return None
+#     if not received_chunks:
+#         return None
     
-    # Sort chunks by sequence number
-    sorted_seq_nums = sorted(received_chunks.keys())
+#     # Sort chunks by sequence number
+#     sorted_seq_nums = sorted(received_chunks.keys())
     
-    # Check for missing chunks
-    expected_seq = 1  # Start from 1
-    missing_chunks = []
+#     # Check for missing chunks
+#     expected_seq = 1  # Start from 1
+#     missing_chunks = []
     
-    for seq in sorted_seq_nums:
-        if seq != expected_seq:
-            # Found a gap
-            missing_chunks.extend(range(expected_seq, seq))
-        expected_seq = seq + 1
+#     for seq in sorted_seq_nums:
+#         if seq != expected_seq:
+#             # Found a gap
+#             missing_chunks.extend(range(expected_seq, seq))
+#         expected_seq = seq + 1
     
-    if missing_chunks:
-        log_debug(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks}")
-        print(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks[:10]}...")
+#     if missing_chunks:
+#         log_debug(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks}")
+#         print(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks[:10]}...")
         
-    # Save diagnostic information
-    chunk_info = {
-        "received_chunks": len(received_chunks),
-        "total_expected": highest_seq_num,
-        "missing_chunks": missing_chunks,
-        "received_seq_nums": sorted_seq_nums
-    }
-    reassembly_file = os.path.join(LOGS_DIR, "reassembly_info.json")
-    with open(reassembly_file, "w") as f:
-        json.dump(chunk_info, f, indent=2)
+#     # Save diagnostic information
+#     chunk_info = {
+#         "received_chunks": len(received_chunks),
+#         "total_expected": highest_seq_num,
+#         "missing_chunks": missing_chunks,
+#         "received_seq_nums": sorted_seq_nums
+#     }
+#     reassembly_file = os.path.join(LOGS_DIR, "reassembly_info.json")
+#     with open(reassembly_file, "w") as f:
+#         json.dump(chunk_info, f, indent=2)
     
-    # Get chunks in order
-    sorted_chunks = [received_chunks[seq] for seq in sorted_seq_nums]
+#     # Get chunks in order
+#     sorted_chunks = [received_chunks[seq] for seq in sorted_seq_nums]
     
-    # Clean chunks (remove trailing null bytes)
-    cleaned_chunks = []
-    for chunk in sorted_chunks:
-        chunk_index = sorted_seq_nums[len(cleaned_chunks)]
+#     # Clean chunks (remove trailing null bytes)
+#     cleaned_chunks = []
+#     for chunk in sorted_chunks:
+#         chunk_index = sorted_seq_nums[len(cleaned_chunks)]
         
-        # Save each raw chunk
-        raw_file = os.path.join(CHUNKS_DIR, "raw", f"chunk_{chunk_index:03d}.bin")
-        with open(raw_file, "wb") as f:
-            f.write(chunk)
+#         # Save each raw chunk
+#         raw_file = os.path.join(CHUNKS_DIR, "raw", f"chunk_{chunk_index:03d}.bin")
+#         with open(raw_file, "wb") as f:
+#             f.write(chunk)
             
-        # Remove trailing zeros, but be careful with all-zero chunks
-        stripped_chunk = chunk.rstrip(b'\0')
-        if stripped_chunk:
-            cleaned_chunks.append(stripped_chunk)
-        else:
-            # If it was all zeros, keep just one zero byte
-            cleaned_chunks.append(b'\0')
+#         # Remove trailing zeros, but be careful with all-zero chunks
+#         stripped_chunk = chunk.rstrip(b'\0')
+#         if stripped_chunk:
+#             cleaned_chunks.append(stripped_chunk)
+#         else:
+#             # If it was all zeros, keep just one zero byte
+#             cleaned_chunks.append(b'\0')
             
-        # Save the cleaned chunk
-        cleaned_file = os.path.join(CHUNKS_DIR, "cleaned", f"chunk_{chunk_index:03d}.bin")
-        with open(cleaned_file, "wb") as f:
-            f.write(cleaned_chunks[-1])
+#         # Save the cleaned chunk
+#         cleaned_file = os.path.join(CHUNKS_DIR, "cleaned", f"chunk_{chunk_index:03d}.bin")
+#         with open(cleaned_file, "wb") as f:
+#             f.write(cleaned_chunks[-1])
     
-    # Concatenate all chunks
-    reassembled_data = b"".join(cleaned_chunks)
+#     # Concatenate all chunks
+#     reassembled_data = b"".join(cleaned_chunks)
     
-    # Save the reassembled data
-    reassembled_file = os.path.join(DATA_DIR, "reassembled_data.bin")
-    with open(reassembled_file, "wb") as f:
-        f.write(reassembled_data)
+#     # Save the reassembled data
+#     reassembled_file = os.path.join(DATA_DIR, "reassembled_data.bin")
+#     with open(reassembled_file, "wb") as f:
+#         f.write(reassembled_data)
         
-    return reassembled_data
+#     return reassembled_data
 
 def verify_data_integrity(data):
     """Verify the integrity of reassembled data using MD5 checksum."""
@@ -428,11 +428,109 @@ def verify_data_integrity(data):
         print("Warning: Data integrity check failed - checksums don't match")
         print(f"Expected: {calculated_checksum.hex()}")
         print(f"Received: {received_checksum.hex()}")
-        return None
+        
+        # IMPORTANT: Return the data without the checksum even if verification fails
+        # This prevents the checksum from appearing as garbage at the end of the text
+        return file_data
         
     log_debug("Data integrity verified successfully")
     print("Data integrity verified successfully")
     return file_data
+
+def reassemble_data():
+    """Reassemble the received chunks in correct order."""
+    global received_chunks
+    
+    if not received_chunks:
+        return None
+    
+    # Sort chunks by sequence number
+    sorted_seq_nums = sorted(received_chunks.keys())
+    
+    # Check for missing chunks
+    expected_seq = 1  # Start from 1
+    missing_chunks = []
+    
+    for seq in sorted_seq_nums:
+        if seq != expected_seq:
+            # Found a gap
+            missing_chunks.extend(range(expected_seq, seq))
+        expected_seq = seq + 1
+    
+    if missing_chunks:
+        log_debug(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks}")
+        print(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks[:10]}...")
+        
+    # Save diagnostic information
+    chunk_info = {
+        "received_chunks": len(received_chunks),
+        "total_expected": highest_seq_num,
+        "missing_chunks": missing_chunks,
+        "received_seq_nums": sorted_seq_nums
+    }
+    reassembly_file = os.path.join(LOGS_DIR, "reassembly_info.json")
+    with open(reassembly_file, "w") as f:
+        json.dump(chunk_info, f, indent=2)
+    
+    # Get chunks in order
+    sorted_chunks = [received_chunks[seq] for seq in sorted_seq_nums]
+    
+    # Clean chunks (remove trailing null bytes)
+    cleaned_chunks = []
+    for i, chunk in enumerate(sorted_chunks):
+        chunk_index = sorted_seq_nums[i]
+        
+        # Save each raw chunk
+        raw_file = os.path.join(CHUNKS_DIR, "raw", f"chunk_{chunk_index:03d}.bin")
+        with open(raw_file, "wb") as f:
+            f.write(chunk)
+            
+        # Remove trailing zeros from all chunks except the last one
+        # This ensures we don't strip legitimate zeros in the final chunk
+        if i < len(sorted_chunks) - 1:
+            stripped_chunk = chunk.rstrip(b'\0')
+            if stripped_chunk:
+                cleaned_chunks.append(stripped_chunk)
+            else:
+                # If it was all zeros, keep just one zero byte
+                cleaned_chunks.append(b'\0')
+        else:
+            # For the last chunk, only strip trailing zeros if we're confident it's padding
+            # Keep at least one null byte if the entire chunk is nulls
+            if all(b == 0 for b in chunk):
+                cleaned_chunks.append(b'\0')
+            else:
+                # Otherwise, be more conservative about stripping nulls from the last chunk
+                # Only strip trailing nulls if there are 3 or more in a row at the end
+                # This helps preserve legitimate nulls that might be part of the data
+                trailing_nulls = 0
+                for b in reversed(chunk):
+                    if b == 0:
+                        trailing_nulls += 1
+                    else:
+                        break
+                
+                if trailing_nulls >= 3:
+                    # Likely padding, strip it
+                    cleaned_chunks.append(chunk.rstrip(b'\0'))
+                else:
+                    # Keep the chunk as is, nulls might be legitimate
+                    cleaned_chunks.append(chunk)
+            
+        # Save the cleaned chunk
+        cleaned_file = os.path.join(CHUNKS_DIR, "cleaned", f"chunk_{chunk_index:03d}.bin")
+        with open(cleaned_file, "wb") as f:
+            f.write(cleaned_chunks[-1])
+    
+    # Concatenate all chunks
+    reassembled_data = b"".join(cleaned_chunks)
+    
+    # Save the reassembled data
+    reassembled_file = os.path.join(DATA_DIR, "reassembled_data.bin")
+    with open(reassembled_file, "wb") as f:
+        f.write(reassembled_data)
+        
+    return reassembled_data
 
 def save_to_file(data, output_path):
     """Save data to a file."""
@@ -619,9 +717,10 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     # Verify data integrity
     verified_data = verify_data_integrity(reassembled_data)
     if not verified_data:
-        log_debug("Warning: Proceeding with unverified data")
-        print("Warning: Proceeding with unverified data")
-        verified_data = reassembled_data
+        log_debug("Warning: Using data without checksum")
+        print("Warning: Using data without checksum")
+        # Instead of using the reassembled data with checksum, use the data portion only
+        verified_data = reassembled_data[:-INTEGRITY_CHECK_SIZE]
     
     # Decrypt the data if key was provided
     if key:
@@ -690,6 +789,7 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     print(f"All session data saved to: {SESSION_DIR}")
     
     return success
+
 
 def monitor_transmission(stop_event, timeout):
     """Monitor transmission for inactivity and completion."""
