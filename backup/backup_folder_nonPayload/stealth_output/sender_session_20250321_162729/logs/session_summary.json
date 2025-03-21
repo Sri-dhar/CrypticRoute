@@ -1,0 +1,8 @@
+{
+  "timestamp": 1742554649.0472288,
+  "file_path": "input.txt",
+  "target_ip": "10.1.6.214",
+  "key_path": "key.txt",
+  "chunk_size": 4,
+  "delay": 0.1
+}
