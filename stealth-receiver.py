@@ -125,6 +125,13 @@ class HeaderSteganography:
     def extract_data_from_udp_header(self, packet):
         """Extract data from UDP header fields."""
         if IP in packet and UDP in packet:
+            # Skip packets on control port - they're control packets, not data
+            if packet[UDP].dport == CONTROL_PORT:
+                # Check if it's a complete command
+                if packet[IP].tos == CMD_COMPLETE:
+                    return None, None, None, CMD_COMPLETE
+                return None, None, None, None
+                
             # Extract command from ToS field
             cmd = packet[IP].tos
             
@@ -138,17 +145,10 @@ class HeaderSteganography:
             # Extract total chunks from fragment offset field
             total_chunks = packet[IP].frag
             
-            # For UDP, we need to extract data from the sport and dport
-            if packet[UDP].dport == CONTROL_PORT:
-                # Extract data from sport
-                sport_bytes = packet[UDP].sport.to_bytes(2, byteorder='big')
-                dport_bytes = packet[UDP].dport.to_bytes(2, byteorder='big')
-                data = sport_bytes + bytes([0, 0])  # We don't store in dport since it's fixed
-            else:
-                # Both sport and dport are used for data
-                sport_bytes = packet[UDP].sport.to_bytes(2, byteorder='big')
-                dport_bytes = packet[UDP].dport.to_bytes(2, byteorder='big')
-                data = sport_bytes + dport_bytes
+            # Extract data from source and destination ports
+            sport_bytes = packet[UDP].sport.to_bytes(2, byteorder='big')
+            dport_bytes = packet[UDP].dport.to_bytes(2, byteorder='big')
+            data = sport_bytes + dport_bytes
             
             # Save the received chunk data
             self.dump_received_chunk(seq_num, data, "UDP")
@@ -205,15 +205,16 @@ class HeaderSteganography:
         if data is None:
             data, seq_num, total_chunks, cmd = self.extract_data_from_icmp_header(packet)
             
-        if data is None or seq_num is None:
-            return False
-            
-        # Process command
+        # Process command even if data is None
         if cmd == CMD_COMPLETE:
             log_debug("Received transmission complete signal")
             print("Received transmission complete signal")
             transmission_complete = True
             return True
+            
+        # Skip if no data or sequence number
+        if data is None or seq_num is None:
+            return False
             
         # Process data chunk
         if cmd == CMD_DATA and data:
@@ -270,7 +271,7 @@ def prepare_key(key_data):
     
     # Truncate to 32 bytes maximum (256 bits)
     key_data = key_data[:32]
-    log_debug(f"Final key length: {len(key_data)} bytes")
+    log_debug(f"Final key length: {len(key_data)} bytes, hex: {key_data.hex()}")
     return key_data
 
 def decrypt_data(data, key):
@@ -306,6 +307,9 @@ def decrypt_data(data, key):
         # Save decrypted data for debugging
         with open("decrypted_data.bin", "wb") as f:
             f.write(decrypted_data)
+        
+        # Print first bytes of decrypted data for debugging    
+        log_debug(f"Decrypted data first 16 bytes: {decrypted_data[:16].hex()}")
             
         return decrypted_data
     except Exception as e:
@@ -479,7 +483,8 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     
     try:
         # Use a more permissive filter to capture more potential packets
-        filter_str = "ip and (icmp or tcp or (udp and port 53))"
+        # This is critical - we want to capture ANY packet that might contain our data
+        filter_str = "ip"  # Capture all IP packets
         log_debug(f"Using filter: {filter_str}")
         
         # Start packet sniffing
@@ -544,23 +549,31 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     if key:
         log_debug("Decrypting data...")
         print("Decrypting data...")
-        decrypted_data = decrypt_data(verified_data, key)
-        if not decrypted_data:
-            log_debug("Decryption failed. Saving raw data instead.")
-            print("Decryption failed. Saving raw data instead.")
-            decrypted_data = verified_data
+        
+        # Use fixed IV for testing/debugging to match sender
+        # In production, should extract from received data
+        if len(verified_data) >= 16:
+            decrypted_data = decrypt_data(verified_data, key)
+            if not decrypted_data:
+                log_debug("Decryption failed. Saving raw data instead.")
+                print("Decryption failed. Saving raw data instead.")
+                decrypted_data = verified_data
+            else:
+                log_debug(f"Successfully decrypted {len(decrypted_data)} bytes")
+                print(f"Successfully decrypted {len(decrypted_data)} bytes")
+                
+                # Try to detect text data
+                try:
+                    sample_text = decrypted_data[:100].decode('utf-8')
+                    log_debug(f"Sample of decrypted text: {sample_text}")
+                    print(f"Sample of decrypted text: {sample_text}")
+                except UnicodeDecodeError:
+                    log_debug("Decrypted data is not text/UTF-8")
+                    print("Decrypted data is not text/UTF-8")
         else:
-            log_debug(f"Successfully decrypted {len(decrypted_data)} bytes")
-            print(f"Successfully decrypted {len(decrypted_data)} bytes")
-            
-            # Try to detect text data
-            try:
-                sample_text = decrypted_data[:100].decode('utf-8')
-                log_debug(f"Sample of decrypted text: {sample_text}")
-                print(f"Sample of decrypted text: {sample_text}")
-            except UnicodeDecodeError:
-                log_debug("Decrypted data is not text/UTF-8")
-                print("Decrypted data is not text/UTF-8")
+            log_debug("Data too short to contain IV")
+            print("Data too short to contain IV")
+            decrypted_data = verified_data
                 
         # Save the decrypted data
         return save_to_file(decrypted_data, output_path)
