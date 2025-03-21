@@ -1,0 +1,42 @@
+{
+  "1": {
+    "data": "0102030405060708",
+    "method": "TCP",
+    "timestamp": 1742548272.0987844
+  },
+  "4": {
+    "data": "49e4a9174327dde2",
+    "method": "TCP",
+    "timestamp": 1742548273.3372803
+  },
+  "7": {
+    "data": "b25ab3c335ff58e3",
+    "method": "TCP",
+    "timestamp": 1742548274.4720159
+  },
+  "2": {
+    "data": "090a0b0c",
+    "method": "ICMP",
+    "timestamp": 1742548276.110625
+  },
+  "3": {
+    "data": "129eb1bf637fa0cf",
+    "method": "TCP",
+    "timestamp": 1742548276.843101
+  },
+  "5": {
+    "data": "e456a722",
+    "method": "ICMP",
+    "timestamp": 1742548277.5706122
+  },
+  "6": {
+    "data": "028793fb667ad861",
+    "method": "TCP",
+    "timestamp": 1742548278.288074
+  },
+  "8": {
+    "data": "07332400",
+    "method": "ICMP",
+    "timestamp": 1742548279.002145
+  }
+}
