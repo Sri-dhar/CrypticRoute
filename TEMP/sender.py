@@ -168,6 +168,8 @@ class SteganographySender:
         
         for attempt in range(attempts):
             log_debug(f"Sending chunk {seq_num}/{total_chunks} (attempt {attempt+1}/{attempts})")
+            # Detailed progress output for each attempt
+            print(f"[SEND] Chunk: {seq_num:04d}/{total_chunks:04d} | Attempt: {attempt+1}/{attempts} | Progress: {(seq_num / total_chunks) * 100:.2f}%")
             send(packet)
             time.sleep(0.1)
         
@@ -293,9 +295,9 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     
     # Read the input file
     log_debug(f"Reading file: {file_path}")
-    print(f"Reading file: {file_path}")
+    print(f"[FILE] Reading: {file_path}")
     file_data = read_file(file_path, 'rb')
-    print(f"Read {len(file_data)} bytes")
+    print(f"[FILE] Read {len(file_data)} bytes successfully")
     
     # Print the content for debugging
     try:
@@ -312,19 +314,20 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     # Encrypt the data if key is provided
     if key_path:
         log_debug(f"Reading encryption key from: {key_path}")
-        print(f"Reading encryption key from: {key_path}")
+        print(f"[ENCRYPT] Reading key from: {key_path}")
         key_data = read_file(key_path, 'rb')
         key = prepare_key(key_data)
         
         log_debug("Encrypting data...")
-        print("Encrypting data...")
+        print(f"[ENCRYPT] Starting encryption of {len(file_data)} bytes...")
         file_data = encrypt_data(file_data, key)
         log_debug(f"Data encrypted, size: {len(file_data)} bytes")
-        print(f"Data encrypted, size: {len(file_data)} bytes")
+        print(f"[ENCRYPT] Completed encryption. Result size: {len(file_data)} bytes")
     
     # Add a simple checksum to verify integrity
     file_checksum = hashlib.md5(file_data).digest()
     log_debug(f"Generated MD5 checksum: {file_checksum.hex()}")
+    print(f"[CHECKSUM] Generated MD5: {file_checksum.hex()}")
     file_data_with_checksum = file_data + file_checksum
     
     # Save the checksum and final data package for debugging
@@ -337,10 +340,11 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
         f.write(file_data_with_checksum)
     
     # Chunk the data
+    print(f"[PREP] Splitting data into chunks of size {chunk_size} bytes...")
     chunks = chunk_data(file_data_with_checksum, chunk_size)
     total_chunks = len(chunks)
     log_debug(f"File split into {total_chunks} chunks")
-    print(f"File split into {total_chunks} chunks")
+    print(f"[PREP] Data split into {total_chunks} chunks")
     
     # Create steganography sender
     stego = SteganographySender(target_ip)
@@ -348,49 +352,57 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     # Send "problematic" chunks first with extra attention
     problem_chunks = [1, 4, 7]
     log_debug("Sending priority chunks first...")
+    print("[PRIORITY] Sending priority chunks first...")
     for seq_num in problem_chunks:
         if seq_num <= total_chunks:
             chunk = chunks[seq_num-1]
             log_debug(f"Sending priority chunk {seq_num}")
+            print(f"[PRIORITY] Sending chunk {seq_num:04d}/{total_chunks:04d}")
             
             # Send multiple times with extra care
             for repeat in range(5):
                 packet = stego.create_packet(chunk, seq_num, total_chunks)
                 log_debug(f"Sending chunk {seq_num} (special attempt {repeat+1}/5)")
+                print(f"[PRIORITY] Chunk {seq_num:04d} attempt {repeat+1}/5")
                 send(packet)
                 time.sleep(0.2)
+            print(f"[PRIORITY] Completed sending chunk {seq_num:04d}")
     
     # Now send all chunks in order
     log_debug(f"Sending data to {target_ip}...")
-    print(f"Sending data to {target_ip}...")
+    print(f"[TRANSMISSION] Starting data transmission to {target_ip}...")
+    print(f"[INFO] Total chunks to send: {total_chunks}")
+
     for i, chunk in enumerate(chunks):
         seq_num = i + 1  # Start from 1
         
         # Skip if it's a priority chunk (already sent with special attention)
         if seq_num in problem_chunks:
+            print(f"[SKIP] Chunk {seq_num:04d} (already sent as priority)")
             continue
         
         # Send the chunk
+        print(f"[PROGRESS] Preparing chunk {seq_num:04d}/{total_chunks:04d}")
         stego.send_chunk(chunk, seq_num, total_chunks)
         
-        # Print progress
-        if i % 5 == 0 or i == total_chunks - 1:
-            progress = (i+1) / total_chunks * 100
-            log_debug(f"Progress: {i+1}/{total_chunks} chunks sent ({progress:.1f}%)")
-            print(f"Progress: {i+1}/{total_chunks} chunks sent ({progress:.1f}%)")
+        # Print completion status
+        progress = (seq_num / total_chunks) * 100
+        print(f"[STATUS] Completed chunk {seq_num:04d}/{total_chunks:04d} | Progress: {progress:.2f}%")
             
         # Add delay between packets
         time.sleep(delay)
     
     # Send completion signal
     completion_packet = stego.create_completion_packet()
-    for _ in range(10):  # Send multiple times to ensure receipt
+    print("[COMPLETE] Sending transmission completion signals...")
+    for i in range(10):  # Send multiple times to ensure receipt
         log_debug("Sending completion signal")
+        print(f"[COMPLETE] Sending signal {i+1}/10")
         send(completion_packet)
         time.sleep(0.2)
     
     log_debug("Transmission complete!")
-    print("Transmission complete!")
+    print("[COMPLETE] Transmission successfully completed!")
     
     # Save session completion info
     completion_info = {
@@ -402,9 +414,143 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     with open(completion_path, "w") as f:
         json.dump(completion_info, f, indent=2)
     
-    print(f"All session data saved to: {SESSION_DIR}")
+    print(f"[INFO] All session data saved to: {SESSION_DIR}")
     
     return True
+
+# def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, delay=0.1):
+#     """Encrypt and send a file via steganography."""
+#     # Initialize debug log
+#     with open(DEBUG_LOG, "w") as f:
+#         f.write(f"=== CrypticRoute Sender Session: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    
+#     # Create a summary file with transmission parameters
+#     summary = {
+#         "timestamp": time.time(),
+#         "file_path": file_path,
+#         "target_ip": target_ip,
+#         "key_path": key_path,
+#         "chunk_size": chunk_size,
+#         "delay": delay
+#     }
+#     summary_path = os.path.join(LOGS_DIR, "session_summary.json")
+#     with open(summary_path, "w") as f:
+#         json.dump(summary, f, indent=2)
+    
+#     # Read the input file
+#     log_debug(f"Reading file: {file_path}")
+#     print(f"Reading file: {file_path}")
+#     file_data = read_file(file_path, 'rb')
+#     print(f"Read {len(file_data)} bytes")
+    
+#     # Print the content for debugging
+#     try:
+#         text_content = file_data.decode('utf-8')
+#         log_debug(f"File content (as text): {text_content}")
+        
+#         # Save the text content as a text file
+#         text_file = os.path.join(DATA_DIR, "original_content.txt")
+#         with open(text_file, "w") as f:
+#             f.write(text_content)
+#     except UnicodeDecodeError:
+#         log_debug(f"File content (as hex): {file_data.hex()}")
+    
+#     # Encrypt the data if key is provided
+#     if key_path:
+#         log_debug(f"Reading encryption key from: {key_path}")
+#         print(f"Reading encryption key from: {key_path}")
+#         key_data = read_file(key_path, 'rb')
+#         key = prepare_key(key_data)
+        
+#         log_debug("Encrypting data...")
+#         print("Encrypting data...")
+#         file_data = encrypt_data(file_data, key)
+#         log_debug(f"Data encrypted, size: {len(file_data)} bytes")
+#         print(f"Data encrypted, size: {len(file_data)} bytes")
+    
+#     # Add a simple checksum to verify integrity
+#     file_checksum = hashlib.md5(file_data).digest()
+#     log_debug(f"Generated MD5 checksum: {file_checksum.hex()}")
+#     file_data_with_checksum = file_data + file_checksum
+    
+#     # Save the checksum and final data package for debugging
+#     checksum_file = os.path.join(DATA_DIR, "md5_checksum.bin")
+#     with open(checksum_file, "wb") as f:
+#         f.write(file_checksum)
+        
+#     final_package_file = os.path.join(DATA_DIR, "final_data_package.bin")
+#     with open(final_package_file, "wb") as f:
+#         f.write(file_data_with_checksum)
+    
+#     # Chunk the data
+#     chunks = chunk_data(file_data_with_checksum, chunk_size)
+#     total_chunks = len(chunks)
+#     log_debug(f"File split into {total_chunks} chunks")
+#     print(f"File split into {total_chunks} chunks")
+    
+#     # Create steganography sender
+#     stego = SteganographySender(target_ip)
+    
+#     # Send "problematic" chunks first with extra attention
+#     problem_chunks = [1, 4, 7]
+#     log_debug("Sending priority chunks first...")
+#     for seq_num in problem_chunks:
+#         if seq_num <= total_chunks:
+#             chunk = chunks[seq_num-1]
+#             log_debug(f"Sending priority chunk {seq_num}")
+            
+#             # Send multiple times with extra care
+#             for repeat in range(5):
+#                 packet = stego.create_packet(chunk, seq_num, total_chunks)
+#                 log_debug(f"Sending chunk {seq_num} (special attempt {repeat+1}/5)")
+#                 send(packet)
+#                 time.sleep(0.2)
+    
+#     # Now send all chunks in order
+#     log_debug(f"Sending data to {target_ip}...")
+#     print(f"Sending data to {target_ip}...")
+#     for i, chunk in enumerate(chunks):
+#         seq_num = i + 1  # Start from 1
+        
+#         # Skip if it's a priority chunk (already sent with special attention)
+#         if seq_num in problem_chunks:
+#             continue
+        
+#         # Send the chunk
+#         stego.send_chunk(chunk, seq_num, total_chunks)
+        
+#         # Print progress
+#         if i % 5 == 0 or i == total_chunks - 1:
+#             progress = (i+1) / total_chunks * 100
+#             log_debug(f"Progress: {i+1}/{total_chunks} chunks sent ({progress:.1f}%)")
+#             print(f"Progress: {i+1}/{total_chunks} chunks sent ({progress:.1f}%)")
+            
+#         # Add delay between packets
+#         time.sleep(delay)
+    
+#     # Send completion signal
+#     completion_packet = stego.create_completion_packet()
+#     for _ in range(10):  # Send multiple times to ensure receipt
+#         log_debug("Sending completion signal")
+#         send(completion_packet)
+#         time.sleep(0.2)
+    
+#     log_debug("Transmission complete!")
+#     print("Transmission complete!")
+    
+#     # Save session completion info
+#     completion_info = {
+#         "completed_at": time.time(),
+#         "total_chunks_sent": total_chunks,
+#         "status": "completed"
+#     }
+#     completion_path = os.path.join(LOGS_DIR, "completion_info.json")
+#     with open(completion_path, "w") as f:
+#         json.dump(completion_info, f, indent=2)
+    
+#     print(f"All session data saved to: {SESSION_DIR}")
+    
+#     return True
 
 def parse_arguments():
     """Parse command line arguments."""
