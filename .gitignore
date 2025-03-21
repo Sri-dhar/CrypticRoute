@@ -12,6 +12,7 @@ build/
 develop-eggs/
 
 downloads/
+stealth_output/
 eggs/
 .eggs/
 lib/
