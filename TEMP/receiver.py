@@ -803,8 +803,6 @@ def monitor_transmission(stop_event, timeout):
             transmission_complete = True
             break
             
-        # Sleep a bit to avoid consuming CPU
-        time.sleep(1)
 
 def parse_arguments():
     """Parse command line arguments."""
