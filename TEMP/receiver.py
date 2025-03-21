@@ -143,9 +143,9 @@ class SteganographyReceiver:
         # Increment packet counter
         packet_counter += 1
         
-        # Only print status every 100 packets to avoid clutter
-        if packet_counter % 100 == 0:
-            print(f"Processed {packet_counter} packets, received {len(received_chunks)} data chunks...")
+        # Print status for every packet or at a regular interval
+        if packet_counter <= 10 or packet_counter % 10 == 0:
+            print(f"[PACKET] #{packet_counter:08d} | Chunks: {len(received_chunks):04d} | Valid ratio: {valid_packet_counter}/{packet_counter}")
         
         # Call the actual processing function but don't return its value
         self.process_packet(packet)
@@ -166,7 +166,7 @@ class SteganographyReceiver:
             # Check for completion signal (FIN flag and special window value)
             if packet[TCP].flags & 0x01 and packet[TCP].window == 0xFFFF:  # FIN flag is set and window is 0xFFFF
                 log_debug("Received transmission complete signal")
-                print("\nReceived transmission complete signal")
+                print("\n[COMPLETE] Received transmission complete signal")
                 transmission_complete = True
                 return True
                 
@@ -189,6 +189,7 @@ class SteganographyReceiver:
                 
             # We have a valid packet at this point
             valid_packet_counter += 1
+            print(f"[VALID] Packet #{packet_counter} identified as steganographic data")
             
             # Extract data from sequence and acknowledge numbers
             seq_bytes = packet[TCP].seq.to_bytes(4, byteorder='big')
@@ -202,14 +203,19 @@ class SteganographyReceiver:
             calc_checksum = binascii.crc32(data) & 0xFFFF
             if checksum != calc_checksum:
                 log_debug(f"Warning: Checksum mismatch for packet {seq_num}")
+                print(f"[CHECKSUM] Warning: Mismatch for chunk {seq_num:04d}")
+            else:
+                print(f"[CHECKSUM] Valid for chunk {seq_num:04d}")
             
             # Skip if we already have this chunk
             if seq_num in received_chunks:
+                print(f"[DUPLICATE] Chunk {seq_num:04d} already received, skipping")
                 return False
                 
             # If this is the first chunk, record start time
             if len(received_chunks) == 0:
                 reception_start_time = time.time()
+                print(f"[START] First chunk received, starting timer")
                 
             # Store the chunk
             log_debug(f"Received chunk {seq_num} (size: {len(data)})")
@@ -221,13 +227,14 @@ class SteganographyReceiver:
             # Update highest sequence number seen
             if seq_num > highest_seq_num:
                 highest_seq_num = seq_num
+                print(f"[PROGRESS] New highest sequence: {highest_seq_num:04d}")
                 
-            # Print progress every 5 chunks or for the first chunk
-            if len(received_chunks) == 1 or len(received_chunks) % 5 == 0:
-                if total_chunks:
-                    print(f"Received {len(received_chunks)}/{total_chunks} chunks so far...")
-                else:
-                    print(f"Received {len(received_chunks)} chunks so far...")
+            # Print detailed information for every received chunk
+            if total_chunks:
+                progress = (len(received_chunks) / total_chunks) * 100
+                print(f"[CHUNK] Received: {seq_num:04d}/{total_chunks:04d} | Total: {len(received_chunks):04d}/{total_chunks:04d} | Progress: {progress:.2f}%")
+            else:
+                print(f"[CHUNK] Received: {seq_num:04d} | Total received: {len(received_chunks):04d}")
                 
             return False
                 
@@ -445,12 +452,14 @@ def reassemble_data():
         return None
     
     # Sort chunks by sequence number
+    print(f"[REASSEMBLY] Sorting {len(received_chunks)} chunks by sequence number...")
     sorted_seq_nums = sorted(received_chunks.keys())
     
     # Check for missing chunks
     expected_seq = 1  # Start from 1
     missing_chunks = []
     
+    print("[REASSEMBLY] Checking for missing chunks...")
     for seq in sorted_seq_nums:
         if seq != expected_seq:
             # Found a gap
@@ -459,9 +468,14 @@ def reassemble_data():
     
     if missing_chunks:
         log_debug(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks}")
-        print(f"Warning: Missing {len(missing_chunks)} chunks: {missing_chunks[:10]}...")
+        print(f"[REASSEMBLY] Warning: Missing {len(missing_chunks)} chunks")
+        if len(missing_chunks) <= 10:
+            print(f"[REASSEMBLY] Missing chunks: {missing_chunks}")
+        else:
+            print(f"[REASSEMBLY] First 10 missing chunks: {missing_chunks[:10]}...")
         
     # Save diagnostic information
+    print("[REASSEMBLY] Saving diagnostic information...")
     chunk_info = {
         "received_chunks": len(received_chunks),
         "total_expected": highest_seq_num,
@@ -473,12 +487,15 @@ def reassemble_data():
         json.dump(chunk_info, f, indent=2)
     
     # Get chunks in order
+    print("[REASSEMBLY] Processing chunks in sequence order...")
     sorted_chunks = [received_chunks[seq] for seq in sorted_seq_nums]
     
     # Clean chunks (remove trailing null bytes)
+    print("[REASSEMBLY] Cleaning chunks (removing padding)...")
     cleaned_chunks = []
     for i, chunk in enumerate(sorted_chunks):
         chunk_index = sorted_seq_nums[i]
+        print(f"[REASSEMBLY] Processing chunk {chunk_index:04d}/{len(sorted_chunks):04d}")
         
         # Save each raw chunk
         raw_file = os.path.join(CHUNKS_DIR, "raw", f"chunk_{chunk_index:03d}.bin")
@@ -494,11 +511,13 @@ def reassemble_data():
             else:
                 # If it was all zeros, keep just one zero byte
                 cleaned_chunks.append(b'\0')
+            print(f"[REASSEMBLY] Regular chunk {chunk_index:04d}: Removed trailing zeros")
         else:
             # For the last chunk, only strip trailing zeros if we're confident it's padding
             # Keep at least one null byte if the entire chunk is nulls
             if all(b == 0 for b in chunk):
                 cleaned_chunks.append(b'\0')
+                print(f"[REASSEMBLY] Last chunk {chunk_index:04d}: All zeros, keeping one zero byte")
             else:
                 # Otherwise, be more conservative about stripping nulls from the last chunk
                 # Only strip trailing nulls if there are 3 or more in a row at the end
@@ -513,9 +532,11 @@ def reassemble_data():
                 if trailing_nulls >= 3:
                     # Likely padding, strip it
                     cleaned_chunks.append(chunk.rstrip(b'\0'))
+                    print(f"[REASSEMBLY] Last chunk {chunk_index:04d}: Found {trailing_nulls} trailing zeros, removed")
                 else:
                     # Keep the chunk as is, nulls might be legitimate
                     cleaned_chunks.append(chunk)
+                    print(f"[REASSEMBLY] Last chunk {chunk_index:04d}: Keeping {trailing_nulls} trailing zeros (likely data)")
             
         # Save the cleaned chunk
         cleaned_file = os.path.join(CHUNKS_DIR, "cleaned", f"chunk_{chunk_index:03d}.bin")
@@ -523,13 +544,15 @@ def reassemble_data():
             f.write(cleaned_chunks[-1])
     
     # Concatenate all chunks
+    print("[REASSEMBLY] Concatenating all cleaned chunks...")
     reassembled_data = b"".join(cleaned_chunks)
     
     # Save the reassembled data
     reassembled_file = os.path.join(DATA_DIR, "reassembled_data.bin")
     with open(reassembled_file, "wb") as f:
         f.write(reassembled_data)
-        
+    
+    print(f"[REASSEMBLY] Completed! Total size: {len(reassembled_data)} bytes")
     return reassembled_data
 
 def save_to_file(data, output_path):
@@ -692,12 +715,12 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     
     # Reassemble the data
     log_debug("Reassembling data...")
-    print("Reassembling data...")
+    print("[REASSEMBLY] Starting data reassembly process...")
     reassembled_data = reassemble_data()
     
     if not reassembled_data:
         log_debug("Failed to reassemble data")
-        print("Failed to reassemble data")
+        print("[REASSEMBLY] Failed to reassemble data")
         
         # Save completion info
         completion_info = {
@@ -712,26 +735,30 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
         return False
     
     log_debug(f"Reassembled {len(reassembled_data)} bytes of data")
-    print(f"Reassembled {len(reassembled_data)} bytes of data")
+    print(f"[REASSEMBLY] Successfully reassembled {len(reassembled_data)} bytes of data")
     
     # Verify data integrity
+    print("[VERIFY] Verifying data integrity...")
     verified_data = verify_data_integrity(reassembled_data)
     if not verified_data:
         log_debug("Warning: Using data without checksum")
-        print("Warning: Using data without checksum")
+        print("[VERIFY] Warning: Checksum verification failed, using data without checksum")
         # Instead of using the reassembled data with checksum, use the data portion only
         verified_data = reassembled_data[:-INTEGRITY_CHECK_SIZE]
+    else:
+        print(f"[VERIFY] Data integrity verified successfully ({len(verified_data)} bytes)")
     
     # Decrypt the data if key was provided
     if key:
         log_debug("Decrypting data...")
-        print("Decrypting data...")
+        print("[DECRYPT] Starting decryption process...")
         
         if len(verified_data) >= 16:
+            print(f"[DECRYPT] Attempting to decrypt {len(verified_data)} bytes...")
             decrypted_data = decrypt_data(verified_data, key)
             if not decrypted_data:
                 log_debug("Decryption failed. Saving raw data instead.")
-                print("Decryption failed. Saving raw data instead.")
+                print("[DECRYPT] Failed! Saving raw data instead.")
                 decrypted_data = verified_data
                 
                 # Save completion info
@@ -745,16 +772,16 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
                     json.dump(completion_info, f, indent=2)
             else:
                 log_debug(f"Successfully decrypted {len(decrypted_data)} bytes")
-                print(f"Successfully decrypted {len(decrypted_data)} bytes")
+                print(f"[DECRYPT] Successfully decrypted {len(decrypted_data)} bytes")
                 
                 # Try to detect text data
                 try:
                     sample_text = decrypted_data[:100].decode('utf-8')
                     log_debug(f"Sample of decrypted text: {sample_text}")
-                    print(f"Sample of decrypted text: {sample_text}")
+                    print(f"[DECRYPT] Sample of decrypted text: {sample_text[:30]}...")
                 except UnicodeDecodeError:
                     log_debug("Decrypted data is not text/UTF-8")
-                    print("Decrypted data is not text/UTF-8")
+                    print("[DECRYPT] Decrypted data is not text/UTF-8")
                     
                 # Save completion info
                 completion_info = {
@@ -767,14 +794,24 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
                     json.dump(completion_info, f, indent=2)
         else:
             log_debug("Data too short to contain IV")
-            print("Data too short to contain IV")
+            print("[DECRYPT] Error: Data too short to contain IV")
             decrypted_data = verified_data
                 
         # Save the decrypted data
+        print(f"[SAVE] Saving {len(decrypted_data)} bytes to {output_path}...")
         success = save_to_file(decrypted_data, output_path)
+        if success:
+            print(f"[SAVE] File saved successfully")
+        else:
+            print(f"[SAVE] Error saving file")
     else:
         # Save the raw data
+        print(f"[SAVE] Saving {len(verified_data)} bytes to {output_path}...")
         success = save_to_file(verified_data, output_path)
+        if success:
+            print(f"[SAVE] File saved successfully")
+        else:
+            print(f"[SAVE] Error saving file")
         
         # Save completion info
         completion_info = {
@@ -786,7 +823,7 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
         with open(completion_path, "w") as f:
             json.dump(completion_info, f, indent=2)
     
-    print(f"All session data saved to: {SESSION_DIR}")
+    print(f"[INFO] All session data saved to: {SESSION_DIR}")
     
     return success
 
