@@ -1,36 +1,26 @@
 #!/usr/bin/env python3
 """
-CrypticRoute - Advanced Network Steganography Receiver
-Extracts hidden data from IPv4/ICMP/TCP/UDP headers with verification.
+CrypticRoute - Simplified Network Steganography Receiver
 """
 
 import sys
 import os
 import argparse
 import time
-import socket
 import hashlib
 import binascii
 import threading
 import json
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from scapy.all import IP, ICMP, TCP, UDP, Raw, sniff, conf, get_if_addr, send
+from scapy.all import IP, TCP, sniff, conf
 
 # Configure Scapy settings
-conf.verb = 0  # Suppress Scapy output
+conf.verb = 0
 
 # Global settings
-CONTROL_PORT = 53  # DNS port for control communication
-MAX_CHUNK_SIZE = 8  # Maximum bytes per packet in header fields
+MAX_CHUNK_SIZE = 8
 INTEGRITY_CHECK_SIZE = 16  # MD5 checksum size in bytes
-
-# Protocol constants
-CMD_DATA = 1
-CMD_ACK = 2
-CMD_RETRANSMIT = 3
-CMD_COMPLETE = 4
-CMD_ERROR = 5
 
 # Global variables
 received_chunks = {}
@@ -40,7 +30,7 @@ last_activity_time = 0
 highest_seq_num = 0
 
 # Debug log file
-DEBUG_LOG = "stealth_receiver_debug.log"
+DEBUG_LOG = "receiver_debug.log"
 
 def log_debug(message):
     """Write debug message to log file."""
@@ -48,20 +38,17 @@ def log_debug(message):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         f.write(f"[{timestamp}] {message}\n")
 
-class HeaderSteganography:
-    """Class for handling the steganographic operations."""
+class SteganographyReceiver:
+    """Simple steganography receiver using only TCP."""
     
     def __init__(self):
-        """Initialize the steganography handler."""
-        self.recv_window = {}  # For keeping track of received chunks
+        """Initialize the receiver."""
         # Initialize debug file for received chunks
         with open("received_chunks.json", "w") as f:
             f.write("{}")
         
-    def dump_received_chunk(self, seq_num, data, method):
+    def log_chunk(self, seq_num, data):
         """Save received chunk to debug file."""
-        global received_chunks
-        
         # Load existing file
         try:
             with open("received_chunks.json", "r") as f:
@@ -71,8 +58,8 @@ class HeaderSteganography:
         
         # Add this chunk
         chunk_info[str(seq_num)] = {
-            "data": data.hex() if data else None,
-            "method": method,
+            "data": data.hex(),
+            "size": len(data),
             "timestamp": time.time()
         }
         
@@ -80,28 +67,39 @@ class HeaderSteganography:
         with open("received_chunks.json", "w") as f:
             json.dump(chunk_info, f, indent=2)
         
-    def extract_data_from_tcp_header(self, packet):
-        """Extract data from TCP header fields."""
+    def process_packet(self, packet):
+        """Process a packet to extract steganographic data."""
+        global received_chunks, transmission_complete, reception_start_time, last_activity_time, highest_seq_num
+        
+        # Update last activity time
+        last_activity_time = time.time()
+        
+        # Check if it's a valid TCP packet
         if IP in packet and TCP in packet:
-            # Extract command from timestamp option
-            cmd = None
-            for option in packet[TCP].options:
-                if option[0] == 'Timestamp':
-                    cmd = option[1][0]  # First value in timestamp tuple is command
-            
-            # If not a command we recognize, ignore
-            if cmd not in [CMD_DATA, CMD_COMPLETE]:
-                return None, None, None, None
+            # Check for completion signal (FIN flag and special window value)
+            if packet[TCP].flags & 0x01 and packet[TCP].window == 0xFFFF:  # FIN flag is set and window is 0xFFFF
+                log_debug("Received transmission complete signal")
+                print("Received transmission complete signal")
+                transmission_complete = True
+                return True
                 
             # Extract sequence number from window field
             seq_num = packet[TCP].window
             
+            # Ignore packets that don't have our data (window will be 0 or very large normally)
+            if seq_num == 0 or seq_num > 10000:
+                return False
+                
             # Extract total chunks from MSS option
             total_chunks = None
             for option in packet[TCP].options:
                 if option[0] == 'MSS':
                     total_chunks = option[1]
             
+            # If we can't find total chunks, this might not be our packet
+            if total_chunks is None:
+                return False
+                
             # Extract data from sequence and acknowledge numbers
             seq_bytes = packet[TCP].seq.to_bytes(4, byteorder='big')
             ack_bytes = packet[TCP].ack.to_bytes(4, byteorder='big')
@@ -113,114 +111,10 @@ class HeaderSteganography:
             # Verify checksum
             calc_checksum = binascii.crc32(data) & 0xFFFF
             if checksum != calc_checksum:
-                log_debug(f"Warning: Checksum mismatch for TCP packet {seq_num}")
+                log_debug(f"Warning: Checksum mismatch for packet {seq_num}")
             
-            # Save the received chunk data
-            self.dump_received_chunk(seq_num, data, "TCP")
-            
-            return data, seq_num, total_chunks, cmd
-        
-        return None, None, None, None
-    
-    def extract_data_from_udp_header(self, packet):
-        """Extract data from UDP header fields."""
-        if IP in packet and UDP in packet:
-            # Skip packets on control port - they're control packets, not data
-            if packet[UDP].dport == CONTROL_PORT:
-                # Check if it's a complete command
-                if packet[IP].tos == CMD_COMPLETE:
-                    return None, None, None, CMD_COMPLETE
-                return None, None, None, None
-                
-            # Extract command from ToS field
-            cmd = packet[IP].tos
-            
-            # If not a command we recognize, ignore
-            if cmd not in [CMD_DATA, CMD_COMPLETE]:
-                return None, None, None, None
-                
-            # Extract sequence number from IP ID
-            seq_num = packet[IP].id
-            
-            # Extract total chunks from fragment offset field
-            total_chunks = packet[IP].frag
-            
-            # Extract data from source and destination ports
-            sport_bytes = packet[UDP].sport.to_bytes(2, byteorder='big')
-            dport_bytes = packet[UDP].dport.to_bytes(2, byteorder='big')
-            data = sport_bytes + dport_bytes
-            
-            # Save the received chunk data
-            self.dump_received_chunk(seq_num, data, "UDP")
-            
-            return data, seq_num, total_chunks, cmd
-            
-        return None, None, None, None
-    
-    def extract_data_from_icmp_header(self, packet):
-        """Extract data from ICMP header fields."""
-        if IP in packet and ICMP in packet:
-            # Only process Echo Request packets (type 8)
-            if packet[ICMP].type != 8:
-                return None, None, None, None
-                
-            # Extract command from code field
-            cmd = packet[ICMP].code
-            
-            # If not a command we recognize, ignore
-            if cmd not in [CMD_DATA, CMD_COMPLETE]:
-                return None, None, None, None
-                
-            # Extract sequence number from IP ID
-            seq_num = packet[IP].id
-            
-            # Extract total chunks from TOS field
-            total_chunks = packet[IP].tos
-            
-            # Extract data from ICMP ID and sequence number
-            id_bytes = packet[ICMP].id.to_bytes(2, byteorder='big')
-            seq_bytes = packet[ICMP].seq.to_bytes(2, byteorder='big')
-            data = id_bytes + seq_bytes
-            
-            # Save the received chunk data
-            self.dump_received_chunk(seq_num, data, "ICMP")
-            
-            return data, seq_num, total_chunks, cmd
-            
-        return None, None, None, None
-        
-    def process_packet(self, packet):
-        """Process a packet to extract steganographic data."""
-        global received_chunks, transmission_complete, reception_start_time, last_activity_time, highest_seq_num
-        
-        # Update last activity time
-        last_activity_time = time.time()
-        
-        # Try to extract data using different methods
-        data, seq_num, total_chunks, cmd = self.extract_data_from_tcp_header(packet)
-        
-        if data is None:
-            data, seq_num, total_chunks, cmd = self.extract_data_from_udp_header(packet)
-            
-        if data is None:
-            data, seq_num, total_chunks, cmd = self.extract_data_from_icmp_header(packet)
-            
-        # Process command even if data is None
-        if cmd == CMD_COMPLETE:
-            log_debug("Received transmission complete signal")
-            print("Received transmission complete signal")
-            transmission_complete = True
-            return True
-            
-        # Skip if no data or sequence number
-        if data is None or seq_num is None:
-            return False
-            
-        # Process data chunk
-        if cmd == CMD_DATA and data:
             # Skip if we already have this chunk
             if seq_num in received_chunks:
-                log_debug(f"Skipping duplicate chunk {seq_num}")
                 return False
                 
             # If this is the first chunk, record start time
@@ -231,14 +125,19 @@ class HeaderSteganography:
             log_debug(f"Received chunk {seq_num} (size: {len(data)})")
             received_chunks[seq_num] = data
             
+            # Log the chunk
+            self.log_chunk(seq_num, data)
+            
             # Update highest sequence number seen
             if seq_num > highest_seq_num:
                 highest_seq_num = seq_num
                 
-            # Print progress every 10 chunks or for the first chunk
-            if len(received_chunks) == 1 or len(received_chunks) % 10 == 0:
+            # Print progress every 5 chunks or for the first chunk
+            if len(received_chunks) == 1 or len(received_chunks) % 5 == 0:
                 log_debug(f"Received {len(received_chunks)} chunks so far")
                 print(f"Received {len(received_chunks)} chunks so far")
+                
+            return False
                 
         return False
 
@@ -258,20 +157,14 @@ def prepare_key(key_data):
     except:
         pass  # Not a hex string, use as is
     
-    # Ensure key is the correct length for AES
-    if len(key_data) < 16:
-        key_data = key_data.ljust(16, b'\0')  # Pad to 16 bytes (128 bits)
-        log_debug(f"Padded key to 16 bytes")
-    elif 16 < len(key_data) < 24:
-        key_data = key_data.ljust(24, b'\0')  # Pad to 24 bytes (192 bits)
-        log_debug(f"Padded key to 24 bytes")
-    elif 24 < len(key_data) < 32:
-        key_data = key_data.ljust(32, b'\0')  # Pad to 32 bytes (256 bits)
-        log_debug(f"Padded key to 32 bytes")
+    # Ensure key is 32 bytes (256 bits) for AES-256
+    if len(key_data) < 32:
+        key_data = key_data.ljust(32, b'\0')  # Pad to 32 bytes
     
-    # Truncate to 32 bytes maximum (256 bits)
+    # Truncate to 32 bytes maximum
     key_data = key_data[:32]
-    log_debug(f"Final key length: {len(key_data)} bytes, hex: {key_data.hex()}")
+    log_debug(f"Final key: {key_data.hex()}")
+    
     return key_data
 
 def decrypt_data(data, key):
@@ -290,7 +183,7 @@ def decrypt_data(data, key):
         log_debug(f"Extracted IV: {iv.hex()}")
         log_debug(f"Encrypted data size: {len(encrypted_data)} bytes")
         
-        # Save the components for debugging
+        # Save components for debugging
         with open("extracted_iv.bin", "wb") as f:
             f.write(iv)
         
@@ -304,13 +197,12 @@ def decrypt_data(data, key):
         # Decrypt the data
         decrypted_data = decryptor.update(encrypted_data) + decryptor.finalize()
         
-        # Save decrypted data for debugging
+        # Save for debugging
         with open("decrypted_data.bin", "wb") as f:
             f.write(decrypted_data)
-        
-        # Print first bytes of decrypted data for debugging    
-        log_debug(f"Decrypted data first 16 bytes: {decrypted_data[:16].hex()}")
             
+        log_debug(f"Decrypted data: {decrypted_data.hex() if len(decrypted_data) <= 32 else decrypted_data[:32].hex() + '...'}")
+        
         return decrypted_data
     except Exception as e:
         log_debug(f"Decryption error: {e}")
@@ -357,7 +249,7 @@ def reassemble_data():
     # Clean chunks (remove trailing null bytes)
     cleaned_chunks = []
     for chunk in sorted_chunks:
-        # For debugging, save each chunk before cleaning
+        # Save each raw chunk for debugging
         chunk_index = sorted_seq_nums[len(cleaned_chunks)]
         with open(f"chunk_{chunk_index}_raw.bin", "wb") as f:
             f.write(chunk)
@@ -429,6 +321,16 @@ def save_to_file(data, output_path):
             file.write(data)
         log_debug(f"Data saved to {output_path}")
         print(f"Data saved to {output_path}")
+        
+        # Try to print the content as UTF-8 text
+        try:
+            text_content = data.decode('utf-8')
+            log_debug(f"Saved text content: {text_content}")
+            print(f"Saved text content: {text_content}")
+        except UnicodeDecodeError:
+            log_debug("Saved content is not valid UTF-8 text")
+            print("Saved content is not valid UTF-8 text")
+            
         return True
     except Exception as e:
         log_debug(f"Error saving data to {output_path}: {e}")
@@ -436,7 +338,7 @@ def save_to_file(data, output_path):
         return False
 
 def receive_file(output_path, key_path=None, interface=None, timeout=120):
-    """Receive a file via header steganography."""
+    """Receive a file via steganography."""
     global received_chunks, transmission_complete, reception_start_time, last_activity_time, highest_seq_num
     
     # Initialize debug log
@@ -450,8 +352,8 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     last_activity_time = time.time()
     highest_seq_num = 0
     
-    # Create steganography handler
-    stego = HeaderSteganography()
+    # Create steganography receiver
+    stego = SteganographyReceiver()
     
     # Prepare decryption key if provided
     key = None
@@ -482,9 +384,8 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     print("Press Ctrl+C to stop listening")
     
     try:
-        # Use a more permissive filter to capture more potential packets
-        # This is critical - we want to capture ANY packet that might contain our data
-        filter_str = "ip"  # Capture all IP packets
+        # Use a filter for TCP packets
+        filter_str = "tcp"
         log_debug(f"Using filter: {filter_str}")
         
         # Start packet sniffing
@@ -550,8 +451,6 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
         log_debug("Decrypting data...")
         print("Decrypting data...")
         
-        # Use fixed IV for testing/debugging to match sender
-        # In production, should extract from received data
         if len(verified_data) >= 16:
             decrypted_data = decrypt_data(verified_data, key)
             if not decrypted_data:
@@ -598,7 +497,7 @@ def monitor_transmission(stop_event, timeout):
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='CrypticRoute - Advanced Network Steganography Receiver')
+    parser = argparse.ArgumentParser(description='CrypticRoute - Simplified Network Steganography Receiver')
     parser.add_argument('--output', '-o', required=True, help='Output file path')
     parser.add_argument('--key', '-k', help='Decryption key file (optional)')
     parser.add_argument('--interface', '-i', help='Network interface to listen on')

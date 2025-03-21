@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-CrypticRoute - Advanced Network Steganography Sender
-Hides data in IPv4/ICMP headers with confirmation and error-correction.
+CrypticRoute - Simplified Network Steganography Sender
 """
 
 import sys
@@ -9,33 +8,22 @@ import os
 import argparse
 import time
 import random
-import socket
-import struct
 import hashlib
-import binascii
 import json
+import binascii
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from scapy.all import IP, ICMP, TCP, UDP, send, sniff, Raw, conf, sr1, sr
+from scapy.all import IP, TCP, send, conf
 
 # Configure Scapy settings
-conf.verb = 0  # Suppress Scapy output
+conf.verb = 0
 
 # Global settings
+MAX_CHUNK_SIZE = 8
 RETRANSMIT_ATTEMPTS = 5
-ACK_TIMEOUT = 2
-CONTROL_PORT = 53  # DNS port for control communication (less likely to be blocked)
-MAX_CHUNK_SIZE = 8  # Maximum bytes per packet in header fields
-
-# Protocol constants
-CMD_DATA = 1
-CMD_ACK = 2
-CMD_RETRANSMIT = 3
-CMD_COMPLETE = 4
-CMD_ERROR = 5
 
 # Debug log file
-DEBUG_LOG = "stealth_sender_debug.log"
+DEBUG_LOG = "sender_debug.log"
 
 def log_debug(message):
     """Write debug message to log file."""
@@ -43,196 +31,82 @@ def log_debug(message):
         timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
         f.write(f"[{timestamp}] {message}\n")
 
-class HeaderSteganography:
-    """Class for handling the steganographic operations."""
+class SteganographySender:
+    """Simple steganography sender using only TCP."""
     
-    def __init__(self, target_ip=None, source_port=random.randint(1024, 65000)):
-        """Initialize the steganography handler."""
+    def __init__(self, target_ip):
+        """Initialize the sender."""
         self.target_ip = target_ip
-        self.source_port = source_port
-        self.recv_window = {}  # For keeping track of received chunks
-        # Create and clear debug files
+        self.source_port = random.randint(10000, 60000)
+        
+        # Create debug file
         with open("sent_chunks.json", "w") as f:
             f.write("{}")
         self.sent_chunks = {}
 
-    def dump_chunk_data(self, seq_num, data, method):
+    def log_chunk(self, seq_num, data):
         """Save chunk data to debug file."""
-        self.sent_chunks[seq_num] = {
+        self.sent_chunks[str(seq_num)] = {
             "data": data.hex(),
-            "method": method,
+            "size": len(data),
             "timestamp": time.time()
         }
         with open("sent_chunks.json", "w") as f:
             json.dump(self.sent_chunks, f, indent=2)
-        
-    def encode_data_in_tcp_header(self, data, seq_num, total_chunks, cmd=CMD_DATA):
-        """Encode data in TCP header fields."""
-        # Ensure data is the right size
+    
+    def create_packet(self, data, seq_num, total_chunks):
+        """Create a TCP packet with embedded data."""
+        # Ensure data is exactly 8 bytes
         if len(data) < MAX_CHUNK_SIZE:
-            padding_size = MAX_CHUNK_SIZE - len(data)
-            log_debug(f"Padding TCP chunk {seq_num} with {padding_size} bytes")
             data = data.ljust(MAX_CHUNK_SIZE, b'\0')
         elif len(data) > MAX_CHUNK_SIZE:
-            log_debug(f"Truncating TCP chunk {seq_num} from {len(data)} to {MAX_CHUNK_SIZE} bytes")
             data = data[:MAX_CHUNK_SIZE]
             
-        # Create a random destination port
-        dst_port = random.randint(1024, 65000)
+        # Create random destination port for stealth
+        dst_port = random.randint(10000, 60000)
         
-        # Create TCP packet with encoded fields
+        # Embed first 4 bytes in sequence number and last 4 in ack number
         tcp_packet = IP(dst=self.target_ip) / TCP(
             sport=self.source_port,
             dport=dst_port,
-            seq=int.from_bytes(data[0:4], byteorder='big'),  # 4 bytes in seq number
-            ack=int.from_bytes(data[4:8], byteorder='big'),  # 4 bytes in ack number
-            window=seq_num,                                  # Sequence number in window field
-            flags="S",                                       # SYN packet (less likely to be blocked)
-            options=[
-                ('MSS', total_chunks),                       # Total chunks in MSS option
-                ('Timestamp', (cmd, 0))                      # Command in timestamp
-            ]
+            seq=int.from_bytes(data[0:4], byteorder='big'),
+            ack=int.from_bytes(data[4:8], byteorder='big'),
+            window=seq_num,  # Put sequence number in window field
+            flags="S",  # SYN packet
+            options=[('MSS', total_chunks)]  # Store total chunks in MSS option
         )
         
-        # Modify Time to Live for additional data channel
-        tcp_packet[IP].ttl = 64 + random.randint(0, 10)  # Randomize TTL a bit for stealth
-        
-        # ID field stores checksum of data (for verification)
-        checksum = binascii.crc32(data) & 0xFFFF  # 16-bit checksum
+        # Store checksum in ID field
+        checksum = binascii.crc32(data) & 0xFFFF
         tcp_packet[IP].id = checksum
         
-        # Save chunk details for debugging
-        self.dump_chunk_data(seq_num, data, "TCP")
-        
+        return tcp_packet
+    
+    def create_completion_packet(self):
+        """Create a packet signaling transmission completion."""
+        tcp_packet = IP(dst=self.target_ip) / TCP(
+            sport=self.source_port,
+            dport=random.randint(10000, 60000),
+            window=0xFFFF,  # Special value for completion
+            flags="F"  # FIN packet signals completion
+        )
         return tcp_packet
         
-    def encode_data_in_udp_header(self, data, seq_num, total_chunks, cmd=CMD_DATA):
-        """Encode data in UDP header fields."""
-        # Ensure data is the right size - UDP encoding is fixed at 4 bytes
-        if len(data) < 4:
-            padding_size = 4 - len(data)
-            log_debug(f"Padding UDP chunk {seq_num} with {padding_size} bytes")
-            data = data.ljust(4, b'\0')
-        elif len(data) > 4:
-            log_debug(f"Truncating UDP chunk {seq_num} from {len(data)} to 4 bytes")
-            data = data[:4]
+    def send_chunk(self, data, seq_num, total_chunks):
+        """Send a data chunk with multiple attempts."""
+        packet = self.create_packet(data, seq_num, total_chunks)
         
-        # Extract values from the data bytes for UDP fields
-        data_int1 = int.from_bytes(data[0:2], byteorder='big')
-        data_int2 = int.from_bytes(data[2:4], byteorder='big')
+        # Log the chunk
+        self.log_chunk(seq_num, data)
         
-        # Use a different port than CONTROL_PORT to avoid interference with control messages
-        target_dport = random.randint(49152, 65535)
-            
-        # Create UDP packet with encoded fields
-        udp_packet = IP(dst=self.target_ip) / UDP(
-            sport=data_int1 if data_int1 > 1024 else 1024 + data_int1,  # Use first 2 bytes as source port
-            dport=data_int2 if data_int2 > 1024 else 1024 + data_int2,  # Use last 2 bytes as dest port
-        )
+        # Send with multiple attempts
+        attempts = RETRANSMIT_ATTEMPTS if seq_num in [1, 4, 7] else 3
         
-        # Store sequence number in IP ID
-        udp_packet[IP].id = seq_num
-        
-        # Store total chunks in fragment offset field
-        udp_packet[IP].frag = total_chunks & 0x1FFF  # 13 bits only
-        
-        # Store command in ToS field
-        udp_packet[IP].tos = cmd
-        
-        # Save chunk details for debugging
-        self.dump_chunk_data(seq_num, data, "UDP")
-        
-        return udp_packet
-    
-    def encode_data_in_icmp_header(self, data, seq_num, total_chunks, cmd=CMD_DATA):
-        """Encode data in ICMP header fields."""
-        # Ensure data is the right size - ICMP encoding is fixed at 4 bytes
-        if len(data) < 4:
-            padding_size = 4 - len(data)
-            log_debug(f"Padding ICMP chunk {seq_num} with {padding_size} bytes")
-            data = data.ljust(4, b'\0')
-        elif len(data) > 4:
-            log_debug(f"Truncating ICMP chunk {seq_num} from {len(data)} to 4 bytes")
-            data = data[:4]
-            
-        # Extract values from the data bytes
-        icmp_id = int.from_bytes(data[0:2], byteorder='big')   # 2 bytes for ID
-        icmp_seq = int.from_bytes(data[2:4], byteorder='big')  # 2 bytes for seq
-        
-        # Create ICMP packet with encoded fields
-        icmp_packet = IP(dst=self.target_ip) / ICMP(
-            type=8,          # Echo request
-            code=cmd,        # Use code field for command
-            id=icmp_id,      # ICMP ID from first 2 bytes of data
-            seq=icmp_seq     # ICMP sequence from next 2 bytes of data
-        )
-        
-        # Store sequence number in IP ID
-        icmp_packet[IP].id = seq_num
-        
-        # Store total chunks in TOS field + flags (can store up to 255)
-        icmp_packet[IP].tos = total_chunks & 0xFF
-        
-        # Modify TTL for stealth
-        icmp_packet[IP].ttl = 64 + random.randint(0, 10)
-        
-        # Save chunk details for debugging
-        self.dump_chunk_data(seq_num, data, "ICMP")
-        
-        return icmp_packet
-
-    def create_control_packet(self, cmd, seq_num=0, data=b''):
-        """Create a control packet (ACK, RETRANSMIT, COMPLETE)."""
-        # Control packets use UDP for reliability
-        udp_packet = IP(dst=self.target_ip) / UDP(
-            sport=self.source_port,
-            dport=CONTROL_PORT
-        )
-        
-        # Set the command in TOS field
-        udp_packet[IP].tos = cmd
-        
-        # Set sequence number in IP ID
-        udp_packet[IP].id = seq_num
-        
-        return udp_packet
-        
-    def send_data_with_verification(self, data_chunk, seq_num, total_chunks, cmd=CMD_DATA):
-        """Send a data chunk and verify receipt."""
-        
-        # OVERRIDE: Always use TCP for known problematic sequence numbers
-        if seq_num in [1, 4, 7]:
-            log_debug(f"Using TCP for problematic chunk {seq_num}")
-            method = "TCP"
-            packet = self.encode_data_in_tcp_header(data_chunk, seq_num, total_chunks, cmd)
-            # Send it immediately with extra attempts
-            for _ in range(3):  # Send 3 times right away
-                send(packet)
-                time.sleep(0.1)
-            return True
-            
-        # For other chunks, use normal rotation between methods
-        for attempt in range(RETRANSMIT_ATTEMPTS):
-            # Use different encoding methods for diversity and resilience
-            if seq_num % 3 == 0:
-                method = "TCP"
-                packet = self.encode_data_in_tcp_header(data_chunk, seq_num, total_chunks, cmd)
-            elif seq_num % 3 == 1:
-                method = "UDP"
-                packet = self.encode_data_in_udp_header(data_chunk, seq_num, total_chunks, cmd)
-            else:
-                method = "ICMP"
-                packet = self.encode_data_in_icmp_header(data_chunk, seq_num, total_chunks, cmd)
-                
-            # Log the sending attempt
-            log_debug(f"Sending chunk {seq_num}/{total_chunks} using {method} (attempt {attempt+1}/{RETRANSMIT_ATTEMPTS})")
-            
-            # Send the packet
+        for attempt in range(attempts):
+            log_debug(f"Sending chunk {seq_num}/{total_chunks} (attempt {attempt+1}/{attempts})")
             send(packet)
-            
-            # Delay between attempts
             time.sleep(0.1)
-            
+        
         return True
 
 def read_file(file_path, mode='rb'):
@@ -242,10 +116,6 @@ def read_file(file_path, mode='rb'):
             data = file.read()
             log_debug(f"Read {len(data)} bytes from {file_path}")
             return data
-    except FileNotFoundError:
-        log_debug(f"Error: File not found: {file_path}")
-        print(f"Error: File not found: {file_path}")
-        sys.exit(1)
     except Exception as e:
         log_debug(f"Error reading file {file_path}: {e}")
         print(f"Error reading file {file_path}: {e}")
@@ -267,27 +137,20 @@ def prepare_key(key_data):
     except:
         pass  # Not a hex string, use as is
     
-    # Ensure key is the correct length for AES
-    if len(key_data) < 16:
-        key_data = key_data.ljust(16, b'\0')  # Pad to 16 bytes (128 bits)
-        log_debug(f"Padded key to 16 bytes")
-    elif 16 < len(key_data) < 24:
-        key_data = key_data.ljust(24, b'\0')  # Pad to 24 bytes (192 bits)
-        log_debug(f"Padded key to 24 bytes")
-    elif 24 < len(key_data) < 32:
-        key_data = key_data.ljust(32, b'\0')  # Pad to 32 bytes (256 bits)
-        log_debug(f"Padded key to 32 bytes")
+    # Ensure key is 32 bytes (256 bits) for AES-256
+    if len(key_data) < 32:
+        key_data = key_data.ljust(32, b'\0')  # Pad to 32 bytes
     
-    # Truncate to 32 bytes maximum (256 bits)
+    # Truncate to 32 bytes maximum
     key_data = key_data[:32]
-    log_debug(f"Final key length: {len(key_data)} bytes, hex: {key_data.hex()}")
+    log_debug(f"Final key: {key_data.hex()}")
+    
     return key_data
 
 def encrypt_data(data, key):
     """Encrypt data using AES."""
     try:
-        # Use fixed IV for testing/debugging
-        # In production, remove this and use random IV
+        # Use a fixed IV for testing/debugging
         iv = b'\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0A\x0B\x0C\x0D\x0E\x0F\x10'
         log_debug(f"Using IV: {iv.hex()}")
         
@@ -305,9 +168,8 @@ def encrypt_data(data, key):
         with open("encrypted_data.bin", "wb") as f:
             f.write(iv + encrypted_data)
             
-        # Print first few bytes for debugging
-        log_debug(f"Original data first 16 bytes: {data[:16].hex()}")
-        log_debug(f"Encrypted data first 16 bytes: {encrypted_data[:16].hex()}")
+        log_debug(f"Original data: {data.hex() if len(data) <= 32 else data[:32].hex() + '...'}")
+        log_debug(f"Encrypted data: {encrypted_data.hex() if len(encrypted_data) <= 32 else encrypted_data[:32].hex() + '...'}")
             
         # Prepend IV to the encrypted data for use in decryption
         return iv + encrypted_data
@@ -329,7 +191,7 @@ def chunk_data(data, chunk_size=MAX_CHUNK_SIZE):
     return chunks
 
 def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, delay=0.1):
-    """Encrypt and send a file via header steganography."""
+    """Encrypt and send a file via steganography."""
     # Initialize debug log
     with open(DEBUG_LOG, "w") as f:
         f.write(f"=== CrypticRoute Sender Session: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
@@ -339,6 +201,13 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     print(f"Reading file: {file_path}")
     file_data = read_file(file_path, 'rb')
     print(f"Read {len(file_data)} bytes")
+    
+    # Print the content for debugging
+    try:
+        text_content = file_data.decode('utf-8')
+        log_debug(f"File content (as text): {text_content}")
+    except UnicodeDecodeError:
+        log_debug(f"File content (as hex): {file_data.hex()}")
     
     # Encrypt the data if key is provided
     if key_path:
@@ -368,55 +237,51 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     log_debug(f"File split into {total_chunks} chunks")
     print(f"File split into {total_chunks} chunks")
     
-    # Create steganography handler
-    stego = HeaderSteganography(target_ip)
+    # Create steganography sender
+    stego = SteganographySender(target_ip)
     
-    # Send each chunk - FIRST send the problematic chunks
-    # This is to ensure they have the highest chance of being received
+    # Send "problematic" chunks first with extra attention
     problem_chunks = [1, 4, 7]
-    
-    log_debug("Sending problematic chunks first...")
+    log_debug("Sending priority chunks first...")
     for seq_num in problem_chunks:
         if seq_num <= total_chunks:
-            chunk = chunks[seq_num-1]  # -1 because list is 0-indexed
-            log_debug(f"Sending problematic chunk {seq_num}")
+            chunk = chunks[seq_num-1]
+            log_debug(f"Sending priority chunk {seq_num}")
             
-            # Force TCP for known problematic chunks
-            tcp_packet = stego.encode_data_in_tcp_header(chunk, seq_num, total_chunks, CMD_DATA)
-            
-            # Send multiple times with longer delay
+            # Send multiple times with extra care
             for repeat in range(5):
-                log_debug(f"Sending problematic chunk {seq_num} attempt {repeat+1}/5")
-                send(tcp_packet)
-                time.sleep(0.2)  # Longer delay for problematic chunks
+                packet = stego.create_packet(chunk, seq_num, total_chunks)
+                log_debug(f"Sending chunk {seq_num} (special attempt {repeat+1}/5)")
+                send(packet)
+                time.sleep(0.2)
     
     # Now send all chunks in order
-    log_debug(f"Sending data to {target_ip} using header steganography...")
-    print(f"Sending data to {target_ip} using header steganography...")
+    log_debug(f"Sending data to {target_ip}...")
+    print(f"Sending data to {target_ip}...")
     for i, chunk in enumerate(chunks):
         seq_num = i + 1  # Start from 1
         
-        # Skip if it's a problematic chunk (already sent)
+        # Skip if it's a priority chunk (already sent with special attention)
         if seq_num in problem_chunks:
-            log_debug(f"Skipping chunk {seq_num} (already sent)")
             continue
         
         # Send the chunk
-        success = stego.send_data_with_verification(chunk, seq_num, total_chunks)
+        stego.send_chunk(chunk, seq_num, total_chunks)
         
         # Print progress
-        if i % 10 == 0 or i == total_chunks - 1:
-            log_debug(f"Progress: {i+1}/{total_chunks} chunks sent")
-            print(f"Progress: {i+1}/{total_chunks} chunks sent")
+        if i % 5 == 0 or i == total_chunks - 1:
+            progress = (i+1) / total_chunks * 100
+            log_debug(f"Progress: {i+1}/{total_chunks} chunks sent ({progress:.1f}%)")
+            print(f"Progress: {i+1}/{total_chunks} chunks sent ({progress:.1f}%)")
             
         # Add delay between packets
         time.sleep(delay)
     
-    # Send completion packet multiple times for reliability
-    log_debug("Sending completion packets...")
-    complete_packet = stego.create_control_packet(CMD_COMPLETE)
-    for _ in range(10):  # Increased to 10
-        send(complete_packet)
+    # Send completion signal
+    completion_packet = stego.create_completion_packet()
+    for _ in range(10):  # Send multiple times to ensure receipt
+        log_debug("Sending completion signal")
+        send(completion_packet)
         time.sleep(0.2)
     
     log_debug("Transmission complete!")
@@ -425,13 +290,13 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='CrypticRoute - Advanced Network Steganography Sender')
+    parser = argparse.ArgumentParser(description='CrypticRoute - Simplified Network Steganography Sender')
     parser.add_argument('--target', '-t', required=True, help='Target IP address')
     parser.add_argument('--input', '-i', required=True, help='Input file to send')
     parser.add_argument('--key', '-k', help='Encryption key file (optional)')
     parser.add_argument('--delay', '-d', type=float, default=0.1, help='Delay between packets in seconds (default: 0.1)')
     parser.add_argument('--chunk-size', '-c', type=int, default=MAX_CHUNK_SIZE, 
-                        help=f'Chunk size in bytes (default: {MAX_CHUNK_SIZE}, max supported by header fields)')
+                        help=f'Chunk size in bytes (default: {MAX_CHUNK_SIZE})')
     return parser.parse_args()
 
 def main():
