@@ -28,6 +28,8 @@ transmission_complete = False
 reception_start_time = 0
 last_activity_time = 0
 highest_seq_num = 0
+packet_counter = 0
+valid_packet_counter = 0
 
 # Debug log file
 DEBUG_LOG = "receiver_debug.log"
@@ -66,10 +68,28 @@ class SteganographyReceiver:
         # Save back to file
         with open("received_chunks.json", "w") as f:
             json.dump(chunk_info, f, indent=2)
+    
+    def packet_handler(self, packet):
+        """Wrapper for process_packet that doesn't print the return value."""
+        global packet_counter
+        
+        # Increment packet counter
+        packet_counter += 1
+        
+        # Only print status every 100 packets to avoid clutter
+        if packet_counter % 100 == 0:
+            print(f"Processed {packet_counter} packets, received {len(received_chunks)} data chunks...")
+        
+        # Call the actual processing function but don't return its value
+        self.process_packet(packet)
+        
+        # Always return None to prevent printing
+        return None
         
     def process_packet(self, packet):
         """Process a packet to extract steganographic data."""
-        global received_chunks, transmission_complete, reception_start_time, last_activity_time, highest_seq_num
+        global received_chunks, transmission_complete, reception_start_time
+        global last_activity_time, highest_seq_num, valid_packet_counter
         
         # Update last activity time
         last_activity_time = time.time()
@@ -79,7 +99,7 @@ class SteganographyReceiver:
             # Check for completion signal (FIN flag and special window value)
             if packet[TCP].flags & 0x01 and packet[TCP].window == 0xFFFF:  # FIN flag is set and window is 0xFFFF
                 log_debug("Received transmission complete signal")
-                print("Received transmission complete signal")
+                print("\nReceived transmission complete signal")
                 transmission_complete = True
                 return True
                 
@@ -100,6 +120,9 @@ class SteganographyReceiver:
             if total_chunks is None:
                 return False
                 
+            # We have a valid packet at this point
+            valid_packet_counter += 1
+            
             # Extract data from sequence and acknowledge numbers
             seq_bytes = packet[TCP].seq.to_bytes(4, byteorder='big')
             ack_bytes = packet[TCP].ack.to_bytes(4, byteorder='big')
@@ -134,8 +157,7 @@ class SteganographyReceiver:
                 
             # Print progress every 5 chunks or for the first chunk
             if len(received_chunks) == 1 or len(received_chunks) % 5 == 0:
-                log_debug(f"Received {len(received_chunks)} chunks so far")
-                print(f"Received {len(received_chunks)} chunks so far")
+                print(f"Received {len(received_chunks)}/{total_chunks} chunks so far...")
                 
             return False
                 
@@ -340,6 +362,7 @@ def save_to_file(data, output_path):
 def receive_file(output_path, key_path=None, interface=None, timeout=120):
     """Receive a file via steganography."""
     global received_chunks, transmission_complete, reception_start_time, last_activity_time, highest_seq_num
+    global packet_counter, valid_packet_counter
     
     # Initialize debug log
     with open(DEBUG_LOG, "w") as f:
@@ -351,6 +374,8 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     reception_start_time = 0
     last_activity_time = time.time()
     highest_seq_num = 0
+    packet_counter = 0
+    valid_packet_counter = 0
     
     # Create steganography receiver
     stego = SteganographyReceiver()
@@ -388,11 +413,11 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
         filter_str = "tcp"
         log_debug(f"Using filter: {filter_str}")
         
-        # Start packet sniffing
+        # Start packet sniffing - use packet_handler wrapper to avoid printing return values
         sniff(
             iface=interface,
             filter=filter_str,
-            prn=stego.process_packet,
+            prn=stego.packet_handler,  # Use the wrapper function
             store=0,
             stop_filter=lambda p: transmission_complete
         )
@@ -413,10 +438,15 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     chunk_count = len(received_chunks)
     
     log_debug(f"\nReception summary:")
-    log_debug(f"- Received {chunk_count} chunks in {duration:.2f} seconds")
+    log_debug(f"- Processed {packet_counter} packets total")
+    log_debug(f"- Identified {valid_packet_counter} valid steganography packets")
+    log_debug(f"- Received {chunk_count} unique data chunks in {duration:.2f} seconds")
     log_debug(f"- Highest sequence number seen: {highest_seq_num}")
+    
     print(f"\nReception summary:")
-    print(f"- Received {chunk_count} chunks in {duration:.2f} seconds")
+    print(f"- Processed {packet_counter} packets total")
+    print(f"- Identified {valid_packet_counter} valid steganography packets")
+    print(f"- Received {chunk_count} unique data chunks in {duration:.2f} seconds")
     print(f"- Highest sequence number seen: {highest_seq_num}")
     
     if highest_seq_num > 0 and chunk_count < highest_seq_num:
