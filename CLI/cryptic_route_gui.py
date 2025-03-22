@@ -656,21 +656,10 @@ class ReceiverPanel(QWidget):
         self.log_queue = queue.Queue()
         self.setup_ui()
         
-        # For progress tracking
-        self.current_chunks = 0
-        self.total_chunks = 100
-        self.reception_active = False
-        self.last_status_update = time.time()
-        self.last_progress_time = time.time()
-        
         # Setup timer for log updates
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self.update_log)
         self.log_timer.start(25)  # Update logs every 25ms for smoother updates
-        
-        # Setup separate timer for progress bar animation
-        self.progress_timer = QTimer(self)
-        self.progress_timer.timeout.connect(self.animate_progress)
         
         # Load saved settings
         self.load_settings()
@@ -936,15 +925,6 @@ class ReceiverPanel(QWidget):
         self.progress_bar.setValue(0)
         self.status_label.setText("Starting reception...")
         
-        # Reset progress tracking
-        self.current_chunks = 0
-        self.total_chunks = 100
-        self.reception_active = True
-        self.last_progress_time = time.time()
-        
-        # Start progress animation timer
-        self.progress_timer.start(30)  # Update every 30ms for smooth animation
-        
         # Disable controls during reception
         self.receive_button.setEnabled(False)
         self.stop_button.setEnabled(True)
@@ -961,63 +941,17 @@ class ReceiverPanel(QWidget):
         """Stop the current reception."""
         if self.worker_thread and self.worker_thread.isRunning():
             self.status_label.setText("Stopping reception...")
-            self.reception_active = False
-            self.progress_timer.stop()
             self.worker_thread.stop()
-    
-    def animate_progress(self):
-        """Update progress bar animation independently of process output."""
-        if not self.reception_active:
-            return
-            
-        # If we haven't received a real progress update in a while, slightly increment the progress
-        current_time = time.time()
-        if current_time - self.last_progress_time > 0.5:  # No updates for half a second
-            # Smoothly animate progress forward
-            current_value = self.progress_bar.value()
-            
-            # Calculate a smooth progress increment
-            # Don't go beyond 95% without real data
-            if current_value < 95:
-                increment = max(0.1, min(0.5, (95 - current_value) * 0.02))
-                new_value = current_value + increment
-                self.progress_bar.setValue(int(new_value))
-                
-                if self.parent and current_time - self.last_status_update >= 0.3:
-                    self.parent.statusBar().showMessage(f"Receiving in progress... ({new_value:.1f}%)")
-                    self.last_status_update = current_time
     
     def update_progress(self, current, total):
         """Update the progress bar."""
-        if not self.reception_active:
-            return
+        if total > 0:
+            percentage = min(100, (current / total) * 100)  # Cap at 100%
+            self.progress_bar.setValue(int(percentage))
             
-        # Record the real progress data
-        self.current_chunks = current
-        self.total_chunks = max(total, self.total_chunks)  # Keep highest estimate
-        self.last_progress_time = time.time()
-        
-        if self.total_chunks > 0:
-            percentage = min(100, (self.current_chunks / self.total_chunks) * 100)  # Cap at 100%
-            
-            # Get current value and calculate a smoother transition
-            current_value = self.progress_bar.value()
-            
-            # Smooth the transition by only going partway to the target
-            if percentage > current_value:
-                # Moving forward - go 30% of the way there
-                new_value = current_value + (percentage - current_value) * 0.3
-            else:
-                # Moving backward - go 80% of the way there
-                new_value = current_value - (current_value - percentage) * 0.8
-                
-            self.progress_bar.setValue(int(new_value))
-            
-            # Update parent's status bar without calling too often
-            current_time = time.time()
-            if self.parent and current_time - self.last_status_update >= 0.2:  # Max 5 updates per second
-                self.parent.statusBar().showMessage(f"Receiving: {self.current_chunks}/{self.total_chunks} chunks ({new_value:.1f}%)")
-                self.last_status_update = current_time
+            # Update parent's status bar
+            if self.parent:
+                self.parent.statusBar().showMessage(f"Receiving: {current}/{total} chunks ({percentage:.1f}%)")
     
     def update_status(self, status):
         """Update the status label."""
@@ -1025,14 +959,6 @@ class ReceiverPanel(QWidget):
     
     def reception_finished(self, success):
         """Handle the completion of reception."""
-        # Stop the progress animation
-        self.reception_active = False
-        self.progress_timer.stop()
-        
-        # Set progress to 100% if successful
-        if success:
-            self.progress_bar.setValue(100)
-        
         # Enable controls
         self.receive_button.setEnabled(True)
         self.stop_button.setEnabled(False)
