@@ -29,6 +29,67 @@ DEFAULT_CHUNK_SIZE = 8
 DEFAULT_TIMEOUT = 120
 DEFAULT_DELAY = 0.1
 
+class ProgressTracker:
+    """A thread-safe class to track and update progress consistently."""
+    
+    def __init__(self, progress_signal):
+        self.progress_signal = progress_signal
+        self.current = 0
+        self.total = 100
+        self.percentage = 0
+        self.has_direct_percentage = False
+        self.lock = threading.Lock()
+        self.last_update_time = 0
+        self.update_interval = 0.03  # 30ms update interval
+        self.last_emitted_value = -1  # Track last emitted value to avoid duplicates
+        
+    def update_from_percentage(self, percentage):
+        """Update progress from a direct percentage value."""
+        with self.lock:
+            # Sanity check - don't allow progress to go backward significantly
+            if percentage < self.percentage - 5 and self.percentage > 20:
+                print(f"Warning: Progress went backward from {self.percentage:.1f}% to {percentage:.1f}%")
+                return
+            
+            self.percentage = min(100, percentage)
+            self.has_direct_percentage = True
+            self._emit_update()
+    
+    def update_from_counts(self, current, total):
+        """Update progress from current/total counts."""
+        with self.lock:
+            if total <= 0:
+                return
+                
+            new_percentage = min(100, (current / total * 100))
+            
+            # Only update if we don't have a direct percentage or this gives a higher value
+            if not self.has_direct_percentage or new_percentage > self.percentage:
+                self.current = current
+                self.total = total
+                self.percentage = new_percentage
+                self._emit_update()
+    
+    def _emit_update(self):
+        """Emit the progress update if enough time has passed or value changed significantly."""
+        current_time = time.time()
+        int_percentage = int(self.percentage)
+        
+        # Emit update if enough time has passed or value changed by at least 1%
+        if (current_time - self.last_update_time >= self.update_interval or 
+                abs(int_percentage - self.last_emitted_value) >= 1):
+            
+            if self.has_direct_percentage:
+                # If we have a direct percentage, use it
+                self.progress_signal.emit(int_percentage, 100)
+            else:
+                # Otherwise use current/total
+                self.progress_signal.emit(self.current, self.total)
+                
+            print(f"Setting progress to {self.percentage:.1f}%")
+            self.last_update_time = current_time
+            self.last_emitted_value = int_percentage
+
 class LogRedirector:
     """Redirects log output to a queue for display in the GUI."""
     
@@ -185,50 +246,42 @@ class WorkerThread(QThread):
             bufsize=1
         )
         
-        # Track progress
-        total_chunks = 100  # Default value until we get a better estimate
-        current_chunk = 0
-        last_progress_update = time.time()
-        progress_update_interval = 0.05  # Update progress at most every 50ms
+        # Initialize progress tracker
+        progress_tracker = ProgressTracker(self.progress_signal)
         
         # Process output
         for line in iter(self.process.stdout.readline, ''):
             if self.stopped:
                 break
                 
-            self.update_signal.emit(line.strip())
-            current_time = time.time()
+            line_stripped = line.strip()
+            self.update_signal.emit(line_stripped)
             
-            # Extract progress information with improved parsing for receiver
+            # Extract progress information with improved parsing
             try:
-                # Look for chunk information in various formats
-                if "[CHUNK]" in line:
-                    if "Progress:" in line:
-                        # Try to parse the progress percentage directly
-                        progress_part = line.split("Progress:")[1].strip()
+                # Direct percentage has highest priority - look for it everywhere
+                if "Progress:" in line_stripped:
+                    try:
+                        progress_part = line_stripped.split("Progress:")[1].strip()
                         percentage = float(progress_part.split("%")[0])
-                        # Use percentage to update progress bar
-                        if current_time - last_progress_update >= progress_update_interval:
-                            self.progress_signal.emit(int(percentage), 100)
-                            last_progress_update = current_time
-                    elif "Received:" in line:
-                        # Extract current/total chunks from lines like:
-                        # [CHUNK] Received: 0001/0012 | Total: 0001/0012 | Progress: 8.33%
-                        for part in line.split('|'):
+                        progress_tracker.update_from_percentage(percentage)
+                    except Exception as e:
+                        print(f"Error parsing direct percentage: {e}")
+                
+                # Look for chunk counts in various formats
+                if "[CHUNK]" in line_stripped:
+                    try:
+                        # Try to find current/total in various formats
+                        for part in line_stripped.split('|'):
                             if "Received:" in part:
                                 parts = part.strip().split(':')[1].strip().split('/')
                                 if len(parts) >= 2:
                                     try:
                                         curr = int(parts[0].strip())
                                         tot = int(parts[1].strip())
-                                        current_chunk = curr
-                                        total_chunks = tot
-                                        
-                                        if current_time - last_progress_update >= progress_update_interval:
-                                            self.progress_signal.emit(current_chunk, total_chunks)
-                                            last_progress_update = current_time
+                                        progress_tracker.update_from_counts(curr, tot)
                                         break
-                                    except:
+                                    except ValueError:
                                         pass
                             elif "Total:" in part:
                                 parts = part.strip().split(':')[1].strip().split('/')
@@ -236,58 +289,45 @@ class WorkerThread(QThread):
                                     try:
                                         curr = int(parts[0].strip())
                                         tot = int(parts[1].strip())
-                                        current_chunk = curr
-                                        total_chunks = tot
-                                        
-                                        if current_time - last_progress_update >= progress_update_interval:
-                                            self.progress_signal.emit(current_chunk, total_chunks)
-                                            last_progress_update = current_time
+                                        progress_tracker.update_from_counts(curr, tot)
                                         break
-                                    except:
+                                    except ValueError:
                                         pass
+                    except Exception as e:
+                        print(f"Error parsing chunk info: {e}")
                 
-                # Also look for progress from packet counter
-                elif "[PACKET]" in line:
-                    # Parse lines like: [PACKET] #00000010 | Chunks: 0001 | Valid ratio: 1/10
+                # Handle packet counter format
+                elif "[PACKET]" in line_stripped:
                     try:
-                        chunks_part = line.split('|')[1].strip()
-                        if "Chunks:" in chunks_part:
+                        chunks_part = None
+                        for part in line_stripped.split('|'):
+                            if "Chunks:" in part:
+                                chunks_part = part.strip()
+                                break
+                                
+                        if chunks_part:
                             current_chunk = int(chunks_part.split(':')[1].strip())
-                            # Update with what we know
+                            # We don't know total, so assume it's at least current + 10
                             if current_chunk > 0:
-                                if current_time - last_progress_update >= progress_update_interval:
-                                    self.progress_signal.emit(current_chunk, max(total_chunks, current_chunk + 10))
-                                    last_progress_update = current_time
-                    except:
-                        pass
-                    
-                # Also track progress from other log lines
-                elif "[PROGRESS]" in line:
-                    # Parse lines like: [PROGRESS] New highest sequence: 0042
+                                progress_tracker.update_from_counts(current_chunk, max(100, current_chunk + 10))
+                    except Exception as e:
+                        print(f"Error parsing packet info: {e}")
+                
+                # Handle progress format
+                elif "[PROGRESS]" in line_stripped:
                     try:
-                        if "New highest sequence:" in line:
-                            seq_part = line.split("sequence:")[1].strip()
+                        if "New highest sequence:" in line_stripped:
+                            seq_part = line_stripped.split("sequence:")[1].strip()
                             current_chunk = int(seq_part)
                             # If we don't know total yet, at least update with what we know
                             if current_chunk > 0:
-                                total_chunks = max(total_chunks, current_chunk + 10)  # Estimate total is at least this many
-                                if current_time - last_progress_update >= progress_update_interval:
-                                    self.progress_signal.emit(current_chunk, total_chunks)
-                                    last_progress_update = current_time
-                    except:
-                        pass
+                                progress_tracker.update_from_counts(current_chunk, max(100, current_chunk + 10))
+                    except Exception as e:
+                        print(f"Error parsing progress info: {e}")
                 
             except Exception as e:
-                print(f"Error parsing receiver progress: {e}")
+                print(f"Error in progress parsing: {e}")
                 
-            # Update status based on log messages
-            if "[COMPLETE]" in line or "Reception complete" in line:
-                self.status_signal.emit("Reception complete")
-            elif "[INFO]" in line and "All session data saved to:" in line:
-                self.status_signal.emit("Data saved successfully")
-            elif "[SAVE]" in line and "File saved successfully" in line:
-                self.status_signal.emit("File saved successfully")
-        
         # Process any errors
         for line in iter(self.process.stderr.readline, ''):
             if self.stopped:
