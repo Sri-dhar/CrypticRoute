@@ -44,7 +44,7 @@ CrypticRoute GUI provides a user-friendly interface for the sender and receiver 
 
 1. Clone this repository:
    ```
-   git clone [repository-url]
+   git clone https://github.com/Sri-dhar/CrypticRoute.git
    cd crypticroute-gui
    ```
 
