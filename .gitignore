@@ -171,3 +171,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+#sender_sessions
+sender_session_*
+sender_latest
