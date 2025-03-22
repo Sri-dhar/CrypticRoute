@@ -99,7 +99,7 @@ class ProgressTracker:
                 # Otherwise use current/total
                 self.progress_signal.emit(self.current, self.total)
                 
-            print(f"Setting progress to {self.percentage:.1f}%")
+            # print(f"Setting progress to {self.percentage:.1f}%")
             self.last_update_time = current_time
             self.last_emitted_value = int_percentage
 
