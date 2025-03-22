@@ -29,6 +29,19 @@ DEFAULT_CHUNK_SIZE = 8
 DEFAULT_TIMEOUT = 120
 DEFAULT_DELAY = 0.1
 
+class LogRedirector:
+    """Redirects log output to a queue for display in the GUI."""
+    
+    def __init__(self, log_queue):
+        self.log_queue = log_queue
+        
+    def write(self, text):
+        if text.strip():  # Only queue non-empty strings
+            self.log_queue.put(text)
+            
+    def flush(self):
+        pass
+
 class ProgressTracker:
     """A thread-safe class to track and update progress consistently."""
     
@@ -89,19 +102,6 @@ class ProgressTracker:
             print(f"Setting progress to {self.percentage:.1f}%")
             self.last_update_time = current_time
             self.last_emitted_value = int_percentage
-
-class LogRedirector:
-    """Redirects log output to a queue for display in the GUI."""
-    
-    def __init__(self, log_queue):
-        self.log_queue = log_queue
-        
-    def write(self, text):
-        if text.strip():  # Only queue non-empty strings
-            self.log_queue.put(text)
-            
-    def flush(self):
-        pass
 
 class WorkerThread(QThread):
     """Background worker thread for running operations without blocking the GUI."""
@@ -257,6 +257,23 @@ class WorkerThread(QThread):
             line_stripped = line.strip()
             self.update_signal.emit(line_stripped)
             
+            # Check for data indicators
+            if "Received chunk data:" in line or "Data chunk" in line or "CHUNK_DATA" in line:
+                try:
+                    # Extract the actual data from the log line
+                    data_prefix = None
+                    for prefix in ["Received chunk data:", "Data chunk:", "CHUNK_DATA:"]:
+                        if prefix in line:
+                            data_prefix = prefix
+                            break
+                    
+                    if data_prefix:
+                        # Extract the data and mark it for display
+                        data_part = line.split(data_prefix, 1)[1].strip()
+                        self.update_signal.emit(f"[DATA] {data_part}")
+                except Exception as e:
+                    print(f"Error extracting data: {e}")
+            
             # Extract progress information with improved parsing
             try:
                 # Direct percentage has highest priority - look for it everywhere
@@ -328,6 +345,14 @@ class WorkerThread(QThread):
             except Exception as e:
                 print(f"Error in progress parsing: {e}")
                 
+            # Update status based on log messages
+            if "[COMPLETE]" in line or "Reception complete" in line:
+                self.status_signal.emit("Reception complete")
+            elif "[INFO]" in line and "All session data saved to:" in line:
+                self.status_signal.emit("Data saved successfully")
+            elif "[SAVE]" in line and "File saved successfully" in line:
+                self.status_signal.emit("File saved successfully")
+        
         # Process any errors
         for line in iter(self.process.stderr.readline, ''):
             if self.stopped:
@@ -694,12 +719,18 @@ class ReceiverPanel(QWidget):
         self.parent = parent
         self.worker_thread = None
         self.log_queue = queue.Queue()
+        self.data_queue = queue.Queue()  # New queue for received data
         self.setup_ui()
         
         # Setup timer for log updates
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self.update_log)
         self.log_timer.start(25)  # Update logs every 25ms for smoother updates
+        
+        # Setup timer for data display updates
+        self.data_timer = QTimer(self)
+        self.data_timer.timeout.connect(self.update_data_display)
+        self.data_timer.start(50)  # Update data display every 50ms
         
         # Load saved settings
         self.load_settings()
@@ -799,8 +830,12 @@ class ReceiverPanel(QWidget):
         progress_group.setLayout(progress_layout)
         main_layout.addWidget(progress_group)
         
-        # Add log area
-        log_group = QGroupBox("Reception Log")
+        # Create a splitter for log and data display
+        splitter = QSplitter(Qt.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        
+        # Log area
+        log_group = QGroupBox("Transmission Log")
         log_layout = QVBoxLayout()
         
         self.log_edit = QTextEdit()
@@ -808,9 +843,38 @@ class ReceiverPanel(QWidget):
         self.log_edit.setFont(QFont("Courier", 9))
         
         log_layout.addWidget(self.log_edit)
-        
         log_group.setLayout(log_layout)
-        main_layout.addWidget(log_group, 1)  # Give log area more vertical space
+        splitter.addWidget(log_group)
+        
+        # Data display area (new)
+        data_group = QGroupBox("Received Data")
+        data_layout = QVBoxLayout()
+        
+        self.data_display = QTextEdit()
+        self.data_display.setReadOnly(True)
+        self.data_display.setFont(QFont("Courier", 9))
+        
+        # Add a save button for the received data
+        self.save_data_button = QPushButton("Save Displayed Data")
+        self.save_data_button.clicked.connect(self.save_displayed_data)
+        
+        # Add a clear button for the data display
+        self.clear_data_button = QPushButton("Clear Display")
+        self.clear_data_button.clicked.connect(self.clear_data_display)
+        
+        data_buttons_layout = QHBoxLayout()
+        data_buttons_layout.addWidget(self.save_data_button)
+        data_buttons_layout.addWidget(self.clear_data_button)
+        
+        data_layout.addWidget(self.data_display)
+        data_layout.addLayout(data_buttons_layout)
+        data_group.setLayout(data_layout)
+        splitter.addWidget(data_group)
+        
+        # Set initial sizes for the splitter (50% each)
+        splitter.setSizes([500, 500])
+        
+        main_layout.addWidget(splitter, 1)  # Give splitter more vertical space
         
         self.setLayout(main_layout)
     
@@ -881,6 +945,25 @@ class ReceiverPanel(QWidget):
         """Add a message to the log."""
         self.log_edit.append(message)
         self.log_edit.moveCursor(QTextCursor.End)
+        
+        # Check for data-related messages and update data display
+        try:
+            # Check for received data markers in log messages
+            if "[DATA]" in message or "[CHUNK] Data:" in message or "Decoded data:" in message:
+                # Extract just the data part after the marker
+                if "[DATA]" in message:
+                    data = message.split("[DATA]", 1)[1].strip()
+                elif "[CHUNK] Data:" in message:
+                    data = message.split("[CHUNK] Data:", 1)[1].strip()
+                elif "Decoded data:" in message:
+                    data = message.split("Decoded data:", 1)[1].strip()
+                else:
+                    data = message
+                    
+                # Queue the data for display
+                self.data_queue.put(data)
+        except Exception as e:
+            print(f"Error processing data display: {e}")
     
     def update_log(self):
         """Update the log with messages from the queue."""
@@ -888,9 +971,49 @@ class ReceiverPanel(QWidget):
             message = self.log_queue.get()
             self.add_log_message(message)
     
+    def update_data_display(self):
+        """Update the data display with received data."""
+        try:
+            # Process multiple data updates in one batch for efficiency
+            data_batch = []
+            while not self.data_queue.empty():
+                data_batch.append(self.data_queue.get())
+                
+            if data_batch:
+                # Combine all new data
+                new_data = '\n'.join(data_batch)
+                
+                # Add to display
+                cursor = self.data_display.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                cursor.insertText(new_data + '\n')
+                self.data_display.setTextCursor(cursor)
+                self.data_display.ensureCursorVisible()
+        except Exception as e:
+            print(f"Error updating data display: {e}")
+    
     def clear_log(self):
         """Clear the log area."""
         self.log_edit.clear()
+    
+    def clear_data_display(self):
+        """Clear the data display area."""
+        self.data_display.clear()
+    
+    def save_displayed_data(self):
+        """Save the currently displayed data to a file."""
+        # Get a filename to save to
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Displayed Data", "", "Text Files (*.txt);;All Files (*)"
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    f.write(self.data_display.toPlainText())
+                QMessageBox.information(self, "Success", f"Data saved to {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save data: {str(e)}")
     
     def start_reception(self):
         """Start the reception process."""
@@ -962,6 +1085,7 @@ class ReceiverPanel(QWidget):
         
         # Clear log and reset progress
         self.clear_log()
+        self.clear_data_display()  # Also clear the data display
         self.progress_bar.setValue(0)
         self.status_label.setText("Starting reception...")
         

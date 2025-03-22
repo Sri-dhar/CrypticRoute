@@ -175,3 +175,5 @@ cython_debug/
 #sender_sessions
 sender_session_*
 sender_latest
+*.bin
+*.json
