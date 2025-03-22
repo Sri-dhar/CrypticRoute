@@ -11,6 +11,7 @@ import datetime
 import threading
 import json
 import queue
+import signal
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                             QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton,
                             QSpinBox, QDoubleSpinBox, QTextEdit, QFileDialog, QComboBox,
@@ -73,6 +74,9 @@ class WorkerThread(QThread):
         delay = self.args.get("delay", DEFAULT_DELAY)
         chunk_size = self.args.get("chunk_size", DEFAULT_CHUNK_SIZE)
         output_dir = self.args.get("output_dir")
+        
+        # Set signal handler for graceful exit
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         cmd = ["python3", "sender.py", "--target", target_ip, "--input", input_file]
         
@@ -86,13 +90,14 @@ class WorkerThread(QThread):
         
         self.status_signal.emit(f"Starting sender with command: {' '.join(cmd)}")
         
-        # Start the process with pipe for stdout and stderr
+        # Start the process with pipe for stdout and stderr (unbuffered)
         self.process = subprocess.Popen(
             cmd, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE,
             universal_newlines=True,
-            bufsize=1
+            bufsize=0,  # Unbuffered output
+            env=dict(os.environ, PYTHONUNBUFFERED="1")  # Force Python to be unbuffered
         )
         
         # Track progress
@@ -106,22 +111,34 @@ class WorkerThread(QThread):
                 
             self.update_signal.emit(line.strip())
             
-            # Extract progress information
+            # Extract progress information - improved parsing
             if "[PREP] Data split into" in line:
                 try:
                     total_chunks = int(line.split("into")[1].strip().split()[0])
                     self.status_signal.emit(f"Total chunks: {total_chunks}")
-                except:
-                    pass
+                except Exception as e:
+                    print(f"Error parsing chunk count: {e}")
             
-            elif "[STATUS] Completed chunk" in line:
+            elif "[STATUS] Completed chunk" in line or "[PROGRESS] " in line:
                 try:
-                    parts = line.split()
-                    chunk_info = parts[3].split('/')
-                    current_chunk = int(chunk_info[0])
-                    self.progress_signal.emit(current_chunk, total_chunks)
-                except:
-                    pass
+                    # Try to extract data from different log line formats
+                    if "[STATUS] Completed chunk" in line:
+                        parts = line.split()
+                        chunk_info = parts[3].split('/')
+                        current_chunk = int(chunk_info[0])
+                        # If we can also extract total from this line, update it
+                        if len(chunk_info) > 1 and chunk_info[1].isdigit():
+                            total_chunks = int(chunk_info[1])
+                    elif "[PROGRESS] " in line:
+                        # Handle progress lines
+                        if "New highest sequence:" in line:
+                            current_chunk = int(line.split("sequence:")[1].strip())
+                    
+                    # Only emit progress updates when we have both values
+                    if current_chunk > 0 and total_chunks > 0:
+                        self.progress_signal.emit(current_chunk, total_chunks)
+                except Exception as e:
+                    print(f"Error parsing progress: {e}")
             
             elif "[COMPLETE] Transmission successfully completed" in line:
                 self.status_signal.emit("Transmission complete")
@@ -182,16 +199,37 @@ class WorkerThread(QThread):
                 
             self.update_signal.emit(line.strip())
             
-            # Extract progress information
-            if "[CHUNK] Received" in line and "Total" in line:
+            # Extract progress information with improved parsing for receiver
+            if "[CHUNK] Received" in line:
                 try:
-                    parts = line.split('|')
-                    chunk_info = parts[1].strip().split('/')
-                    current_chunk = int(chunk_info[0])
-                    total_chunk = int(chunk_info[1])
-                    self.progress_signal.emit(current_chunk, total_chunk)
-                except:
-                    pass
+                    if "Progress:" in line:
+                        # Try to parse the progress percentage directly
+                        progress_part = line.split("Progress:")[1].strip()
+                        percentage = float(progress_part.split("%")[0])
+                        # Use percentage to set progress when exact numbers not available
+                        self.progress_signal.emit(int(percentage), 100)
+                    else:
+                        # Extract current/total chunks
+                        parts = line.split('|')
+                        for part in parts:
+                            if "Total:" in part:
+                                chunk_info = part.strip().split(':')[1].strip().split('/')
+                                current_chunk = int(chunk_info[0])
+                                total_chunk = int(chunk_info[1])
+                                self.progress_signal.emit(current_chunk, total_chunk)
+                                break
+                except Exception as e:
+                    print(f"Error parsing receiver progress: {e}")
+                    
+            # Also track progress from other log lines
+            elif "[PROGRESS] New highest sequence:" in line:
+                try:
+                    current_chunk = int(line.split("sequence:")[1].strip())
+                    # If we don't know total yet, at least update with what we know
+                    if current_chunk > 0:
+                        self.progress_signal.emit(current_chunk, max(current_chunk, 100))
+                except Exception as e:
+                    print(f"Error parsing sequence: {e}")
             
             elif "[COMPLETE] Received transmission complete signal" in line:
                 self.status_signal.emit("Reception complete")
@@ -239,7 +277,7 @@ class SenderPanel(QWidget):
         # Setup timer for log updates
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self.update_log)
-        self.log_timer.start(100)  # Update logs every 100ms
+        self.log_timer.start(50)  # Update logs every 50ms for smoother updates
         
         # Load saved settings
         self.load_settings()
@@ -1001,8 +1039,24 @@ class MainWindow(QMainWindow):
         except:
             self.central_widget.setCurrentIndex(0)
 
+def check_environment():
+    """Check if XDG_RUNTIME_DIR is set and fix it if needed."""
+    if "XDG_RUNTIME_DIR" not in os.environ:
+        # Create a temporary runtime directory and set the environment variable
+        runtime_dir = f"/tmp/runtime-{os.getuid()}"
+        if not os.path.exists(runtime_dir):
+            try:
+                os.makedirs(runtime_dir, mode=0o700)
+            except:
+                pass
+        os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+        print(f"Set XDG_RUNTIME_DIR to {runtime_dir}")
+
 def main():
     """Main application entry point."""
+    # Fix XDG_RUNTIME_DIR issue
+    check_environment()
+    
     # Handle high DPI screens
     if hasattr(Qt, 'AA_EnableHighDpiScaling'):
         QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
@@ -1019,6 +1073,12 @@ def main():
     # Create and show main window
     window = MainWindow()
     window.show()
+    
+    # Display a helpful message about root permissions if running as root
+    if os.geteuid() == 0:
+        print("Running CrypticRoute GUI as root. For a better approach, consider using capabilities instead:")
+        print("sudo setcap cap_net_raw,cap_net_admin=eip $(which python3)")
+        print("This will allow running without sudo while still having necessary permissions.")
     
     sys.exit(app.exec_())
 
