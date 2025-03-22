@@ -944,14 +944,26 @@ class ReceiverPanel(QWidget):
             self.worker_thread.stop()
     
     def update_progress(self, current, total):
-        """Update the progress bar."""
-        if total > 0:
-            percentage = min(100, (current / total) * 100)  # Cap at 100%
-            self.progress_bar.setValue(int(percentage))
+        """Update the progress bar directly without any throttling or smoothing."""
+        try:
+            if total <= 0:
+                return
+                
+            # Calculate percentage - ensure we don't exceed 100%
+            percentage = min(100, (current / total) * 100)
             
-            # Update parent's status bar
+            # Set the progress bar value directly
+            self.progress_bar.setValue(int(percentage))
+            print(f"Setting progress to {percentage:.1f}%")
+            
+            # Update parent's status bar without any throttling
             if self.parent:
-                self.parent.statusBar().showMessage(f"Receiving: {current}/{total} chunks ({percentage:.1f}%)")
+                if isinstance(current, int) and isinstance(total, int):
+                    self.parent.statusBar().showMessage(f"Receiving: {current}/{total} chunks ({percentage:.1f}%)")
+                else:
+                    self.parent.statusBar().showMessage(f"Receiving: {percentage:.1f}%")
+        except Exception as e:
+            print(f"Error updating progress: {e}")
     
     def update_status(self, status):
         """Update the status label."""
