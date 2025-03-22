@@ -255,24 +255,37 @@ class WorkerThread(QThread):
                 break
                 
             line_stripped = line.strip()
-            self.update_signal.emit(line_stripped)
             
-            # Check for data indicators
-            if "Received chunk data:" in line or "Data chunk" in line or "CHUNK_DATA" in line:
-                try:
-                    # Extract the actual data from the log line
-                    data_prefix = None
-                    for prefix in ["Received chunk data:", "Data chunk:", "CHUNK_DATA:"]:
-                        if prefix in line:
-                            data_prefix = prefix
+            # Enhanced data detection - check for data patterns first
+            data_extracted = False
+            try:
+                # Improved data detection with more patterns
+                data_patterns = [
+                    "Received chunk data:", 
+                    "Data chunk:", 
+                    "CHUNK_DATA:",
+                    "Decoded data:", 
+                    "Data:", 
+                    "[CHUNK] Data:", 
+                    "Chunk content:"
+                ]
+                
+                for pattern in data_patterns:
+                    if pattern in line_stripped:
+                        # Extract data and emit a special data signal
+                        data_part = line_stripped.split(pattern, 1)[1].strip()
+                        if data_part:
+                            # Emit a specific marker for data that will be caught by the receiver
+                            self.update_signal.emit(f"[DATA] {data_part}")
+                            print(f"Data extracted: {data_part[:20]}{'...' if len(data_part) > 20 else ''}")
+                            data_extracted = True
                             break
-                    
-                    if data_prefix:
-                        # Extract the data and mark it for display
-                        data_part = line.split(data_prefix, 1)[1].strip()
-                        self.update_signal.emit(f"[DATA] {data_part}")
-                except Exception as e:
-                    print(f"Error extracting data: {e}")
+            except Exception as e:
+                print(f"Error extracting data: {e}")
+            
+            # Send the original line if we didn't extract data
+            if not data_extracted:
+                self.update_signal.emit(line_stripped)
             
             # Extract progress information with improved parsing
             try:
@@ -734,6 +747,33 @@ class ReceiverPanel(QWidget):
         
         # Load saved settings
         self.load_settings()
+        
+    def display_received_file(self, file_path):
+        """Read and display the content of the received file."""
+        try:
+            if not os.path.exists(file_path):
+                print(f"Warning: Cannot display file - {file_path} doesn't exist")
+                return
+                
+            # Read the file content
+            with open(file_path, 'r') as f:
+                content = f.read()
+                
+            # Clear the current display and show the file content
+            self.clear_data_display()
+            self.data_display.setText(content)
+            print(f"Displayed content from file: {file_path}")
+            
+            # Add a note at the beginning indicating this is the file content
+            cursor = self.data_display.textCursor()
+            cursor.setPosition(0)
+            self.data_display.setTextCursor(cursor)
+            self.data_display.insertPlainText(f"--- Content from {os.path.basename(file_path)} ---\n\n")
+            
+        except Exception as e:
+            print(f"Error reading received file: {e}")
+            error_msg = f"Error reading file: {str(e)}"
+            self.data_display.setText(error_msg)
     
     def setup_ui(self):
         """Set up the user interface."""
@@ -946,24 +986,32 @@ class ReceiverPanel(QWidget):
         self.log_edit.append(message)
         self.log_edit.moveCursor(QTextCursor.End)
         
-        # Check for data-related messages and update data display
+        # Enhanced data detection
         try:
-            # Check for received data markers in log messages
-            if "[DATA]" in message or "[CHUNK] Data:" in message or "Decoded data:" in message:
-                # Extract just the data part after the marker
-                if "[DATA]" in message:
-                    data = message.split("[DATA]", 1)[1].strip()
-                elif "[CHUNK] Data:" in message:
-                    data = message.split("[CHUNK] Data:", 1)[1].strip()
-                elif "Decoded data:" in message:
-                    data = message.split("Decoded data:", 1)[1].strip()
-                else:
-                    data = message
-                    
-                # Queue the data for display
+            # Check specifically for our [DATA] tag first (from WorkerThread)
+            if message.startswith("[DATA] "):
+                data = message[7:].strip()  # Remove the [DATA] prefix
+                print(f"Adding to data display: {data[:20]}{'...' if len(data) > 20 else ''}")
                 self.data_queue.put(data)
+                return  # We've handled this message, return early
+            
+            # Also check for other known data patterns in case we missed some
+            data_markers = [
+                "[CHUNK] Data:", 
+                "Decoded data:", 
+                "Received chunk data:", 
+                "Data chunk", 
+                "CHUNK_DATA"
+            ]
+            
+            for marker in data_markers:
+                if marker in message:
+                    data = message.split(marker, 1)[1].strip()
+                    print(f"Alternative data match: {data[:20]}{'...' if len(data) > 20 else ''}")
+                    self.data_queue.put(data)
+                    break
         except Exception as e:
-            print(f"Error processing data display: {e}")
+            print(f"Error processing data for display: {e}")
     
     def update_log(self):
         """Update the log with messages from the queue."""
@@ -976,19 +1024,26 @@ class ReceiverPanel(QWidget):
         try:
             # Process multiple data updates in one batch for efficiency
             data_batch = []
-            while not self.data_queue.empty():
-                data_batch.append(self.data_queue.get())
-                
+            max_items = 20  # Process up to 20 items at once
+            
+            for _ in range(max_items):
+                if not self.data_queue.empty():
+                    data_batch.append(self.data_queue.get_nowait())
+                else:
+                    break
+                    
             if data_batch:
                 # Combine all new data
                 new_data = '\n'.join(data_batch)
                 
-                # Add to display
+                # Add to display with improved cursor handling
                 cursor = self.data_display.textCursor()
                 cursor.movePosition(QTextCursor.End)
                 cursor.insertText(new_data + '\n')
                 self.data_display.setTextCursor(cursor)
                 self.data_display.ensureCursorVisible()
+                
+                print(f"Updated data display with {len(data_batch)} new items")
         except Exception as e:
             print(f"Error updating data display: {e}")
     
@@ -1144,6 +1199,11 @@ class ReceiverPanel(QWidget):
             self.status_label.setText("Reception completed successfully")
             if self.parent:
                 self.parent.statusBar().showMessage("Reception completed successfully")
+                
+            # Display the content of the received file
+            output_file = self.output_file_edit.text().strip()
+            if output_file:
+                self.display_received_file(output_file)
         else:
             self.status_label.setText("Reception failed or was stopped")
             if self.parent:
