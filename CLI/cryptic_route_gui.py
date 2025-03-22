@@ -74,9 +74,6 @@ class WorkerThread(QThread):
         delay = self.args.get("delay", DEFAULT_DELAY)
         chunk_size = self.args.get("chunk_size", DEFAULT_CHUNK_SIZE)
         output_dir = self.args.get("output_dir")
-        
-        # Set signal handler for graceful exit
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
         cmd = ["python3", "sender.py", "--target", target_ip, "--input", input_file]
         
@@ -1056,6 +1053,9 @@ def main():
     """Main application entry point."""
     # Fix XDG_RUNTIME_DIR issue
     check_environment()
+    
+    # Set up signal handling in main thread
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     
     # Handle high DPI screens
     if hasattr(Qt, 'AA_EnableHighDpiScaling'):
