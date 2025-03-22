@@ -13,6 +13,9 @@ import threading
 import json
 import queue
 import signal
+from PyQt6.QtCore import (QThread, pyqtSignal, Qt, QTimer, QSettings, QPropertyAnimation,
+                        QEasingCurve, QSize, QPoint, QRect, QParallelAnimationGroup, 
+                        QSequentialAnimationGroup, QEvent)
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                             QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton,
                             QSpinBox, QDoubleSpinBox, QTextEdit, QFileDialog, QComboBox,
@@ -145,6 +148,13 @@ class AnimatedButton(QPushButton):
     def __init__(self, text, parent=None, color=COLORS['primary']):
         super().__init__(text, parent)
         self.base_color = color
+        
+        # Store colors for manual hover handling
+        self.normal_color = color
+        self.hover_color = self._lighten_color(color, 0.1)
+        self.pressed_color = self._darken_color(color, 0.1)
+        
+        # Apply base styling without hover/pressed states
         self.setStyleSheet(f"""
             QPushButton {{
                 background-color: {color};
@@ -154,25 +164,109 @@ class AnimatedButton(QPushButton):
                 padding: 8px 16px;
                 border-radius: 4px;
             }}
-            QPushButton:hover {{
-                background-color: {self._lighten_color(color, 0.1)};
-            }}
-            QPushButton:pressed {{
-                background-color: {self._darken_color(color, 0.1)};
-            }}
             QPushButton:disabled {{
                 background-color: #cccccc;
                 color: #666666;
             }}
         """)
         
-        # Add a shadow effect for depth
-        self.setGraphicsEffect(self._create_shadow_effect())
+        # Skip the graphics effect completely
+        # self.setGraphicsEffect(self._create_shadow_effect())
+        
+        # Instead, use border or padding to create a subtle depth effect
+        # This styling accomplishes a similar visual effect without using QGraphicsEffect
+        self.setStyleSheet(self.styleSheet() + f"""
+            QPushButton {{
+                border-bottom: 2px solid {self._darken_color(color, 0.2)};
+            }}
+        """)
+        
+        # Install event filter to handle hover manually
+        self.installEventFilter(self)
     
-    def _create_shadow_effect(self):
-        shadow = QGraphicsOpacityEffect(self)
-        shadow.setOpacity(0.95)  # Slight transparency for a shadow-like effect
-        return shadow
+    def eventFilter(self, obj, event):
+        """Handle hover and press events manually"""
+        if obj is self:
+            if event.type() == QEvent.Type.Enter:
+                # Mouse entered - hover effect
+                self.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {self.hover_color};
+                        color: white;
+                        font-weight: bold;
+                        border: none;
+                        padding: 8px 16px;
+                        border-radius: 4px;
+                        border-bottom: 2px solid {self._darken_color(self.hover_color, 0.2)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: #cccccc;
+                        color: #666666;
+                    }}
+                """)
+                return True
+                
+            elif event.type() == QEvent.Type.Leave:
+                # Mouse left - back to normal
+                self.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {self.normal_color};
+                        color: white;
+                        font-weight: bold;
+                        border: none;
+                        padding: 8px 16px;
+                        border-radius: 4px;
+                        border-bottom: 2px solid {self._darken_color(self.normal_color, 0.2)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: #cccccc;
+                        color: #666666;
+                    }}
+                """)
+                return True
+                
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                # Mouse pressed
+                self.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {self.pressed_color};
+                        color: white;
+                        font-weight: bold;
+                        border: none;
+                        padding: 8px 16px;
+                        border-radius: 4px;
+                        border-bottom: 1px solid {self._darken_color(self.pressed_color, 0.2)};
+                        padding-top: 9px; /* Shift content down 1px to give pressed appearance */
+                    }}
+                    QPushButton:disabled {{
+                        background-color: #cccccc;
+                        color: #666666;
+                    }}
+                """)
+                return False  # Let the button also handle this event
+                
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                # Mouse released - back to hover if still over button
+                hover_check = self.rect().contains(event.position().toPoint())
+                color = self.hover_color if hover_check else self.normal_color
+                self.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {color};
+                        color: white;
+                        font-weight: bold;
+                        border: none;
+                        padding: 8px 16px;
+                        border-radius: 4px;
+                        border-bottom: 2px solid {self._darken_color(color, 0.2)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: #cccccc;
+                        color: #666666;
+                    }}
+                """)
+                return False  # Let the button also handle this event
+                
+        return super().eventFilter(obj, event)
     
     def _lighten_color(self, color, amount=0.2):
         """Lighten a hex color by the given amount"""
@@ -189,7 +283,7 @@ class AnimatedButton(QPushButton):
         l = max(0, int(l * (1 - amount)))  # Darken
         c.setHsl(h, s, l, a)
         return c.name()
-
+    
 class LogRedirector:
     """Redirects log output to a queue for display in the GUI."""
     
