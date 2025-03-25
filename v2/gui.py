@@ -31,8 +31,6 @@ import re
 DEFAULT_CHUNK_SIZE = 8
 DEFAULT_TIMEOUT = 120
 DEFAULT_DELAY = 0.1
-DEFAULT_ACK_TIMEOUT = 10
-DEFAULT_MAX_RETRIES = 10
 
 # Modern color scheme
 COLORS = {
@@ -360,7 +358,9 @@ class AcknowledgmentPanel(QWidget):
         
         # Clear the grid
         for i in reversed(range(self.grid_layout.count())):
-            self.grid_layout.itemAt(i).widget().setParent(None)
+            widget = self.grid_layout.itemAt(i).widget()
+            if widget is not None:
+                widget.setParent(None)
     
     def set_total_chunks(self, total):
         """Set the total number of chunks and initialize the grid."""
@@ -372,7 +372,9 @@ class AcknowledgmentPanel(QWidget):
         
         # Clear the grid first
         for i in reversed(range(self.grid_layout.count())):
-            self.grid_layout.itemAt(i).widget().setParent(None)
+            widget = self.grid_layout.itemAt(i).widget()
+            if widget is not None:
+                widget.setParent(None)
         
         # Calculate grid dimensions
         cols = min(20, total)  # Maximum 20 columns
@@ -394,10 +396,13 @@ class AcknowledgmentPanel(QWidget):
                 font-size: 8pt;
             """)
             self.grid_layout.addWidget(indicator, row, col)
+        
+        print(f"Created grid for {total} chunks with {rows} rows and {cols} columns")
     
     def acknowledge_chunk(self, chunk_num):
         """Mark a specific chunk as acknowledged."""
         if chunk_num <= 0 or chunk_num > self.total_chunks:
+            print(f"Warning: Chunk number {chunk_num} out of bounds (total: {self.total_chunks})")
             return
             
         # Add to the set of acknowledged chunks
@@ -416,9 +421,11 @@ class AcknowledgmentPanel(QWidget):
         row = (chunk_num - 1) // cols
         col = (chunk_num - 1) % cols
         
+        # Get the widget at the position
         item = self.grid_layout.itemAtPosition(row, col)
         if item and item.widget():
             indicator = item.widget()
+            # Apply highlighting style to indicate acknowledgment
             indicator.setStyleSheet(f"""
                 background-color: {COLORS['ack']};
                 color: {COLORS['text_light']};
@@ -427,6 +434,9 @@ class AcknowledgmentPanel(QWidget):
                 font-size: 8pt;
                 font-weight: bold;
             """)
+            print(f"Highlighted indicator for chunk {chunk_num} at position ({row}, {col})")
+        else:
+            print(f"Warning: No indicator found for chunk {chunk_num} at position ({row}, {col})")
 
 class AnimatedStatusLabel(QLabel):
     """A status label without fade animations"""
@@ -555,8 +565,9 @@ class WorkerThread(QThread):
     progress_signal = pyqtSignal(int, int)
     status_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(bool)
-    handshake_signal = pyqtSignal(str)  # Signal for handshake status
-    ack_signal = pyqtSignal(int)         # Signal for acknowledged packets
+    handshake_signal = pyqtSignal(str)      # Signal for handshake status
+    ack_signal = pyqtSignal(int)            # Signal for acknowledged packets
+    total_chunks_signal = pyqtSignal(int)   # Signal for total chunks count
     
     def __init__(self, operation, args):
         super().__init__()
@@ -582,8 +593,6 @@ class WorkerThread(QThread):
         delay = self.args.get("delay", DEFAULT_DELAY)
         chunk_size = self.args.get("chunk_size", DEFAULT_CHUNK_SIZE)
         output_dir = self.args.get("output_dir")
-        ack_timeout = self.args.get("ack_timeout", DEFAULT_ACK_TIMEOUT)
-        max_retries = self.args.get("max_retries", DEFAULT_MAX_RETRIES)
         
         cmd = ["python3", "sender.py", "--target", target_ip, "--input", input_file]
         if key_file:
@@ -592,14 +601,10 @@ class WorkerThread(QThread):
             cmd.extend(["--output-dir", output_dir])
         cmd.extend(["--delay", str(delay), "--chunk-size", str(chunk_size)])
         
-        # Fix: Convert ack_timeout to integer before passing to command line
-        cmd.extend(["--ack-timeout", str(int(ack_timeout)), "--max-retries", str(max_retries)])
-        
         self.status_signal.emit(f"Starting sender with command: {' '.join(cmd)}")
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         universal_newlines=True, bufsize=0,
                                         env=dict(os.environ, PYTHONUNBUFFERED="1"))
-    
         total_chunks = 0
         current_chunk = 0
         
@@ -620,20 +625,38 @@ class WorkerThread(QThread):
                 self.handshake_signal.emit("established")
                 self.status_signal.emit("Connection established")
 
-            # Track ACK received
+            # Detect ACK received - improved pattern matching
             ack_match = re.search(r"\[ACK\] Received acknowledgment for chunk (\d+)", line)
             if ack_match:
-                chunk_num = int(ack_match.group(1))
-                self.ack_signal.emit(chunk_num)
+                try:
+                    chunk_num = int(ack_match.group(1))
+                    print(f"Detected ACK for chunk {chunk_num}")
+                    self.ack_signal.emit(chunk_num)
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing ACK number: {e}")
+                    
+            # Also detect successful delivery confirmations as another way to track ACKs
+            confirmed_match = re.search(r"\[CONFIRMED\] Chunk (\d+) successfully delivered", line)
+            if confirmed_match:
+                try:
+                    chunk_num = int(confirmed_match.group(1))
+                    print(f"Detected confirmation for chunk {chunk_num}")
+                    self.ack_signal.emit(chunk_num)
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing confirmation number: {e}")
                 
-            # Parse chunk counts for progress bar
+            # Parse total chunks information early to set up visualization properly
             if "[PREP] Data split into" in line:
                 try:
                     total_chunks = int(line.split("into")[1].strip().split()[0])
                     self.status_signal.emit(f"Total chunks: {total_chunks}")
+                    # Emit special signal to set up visualization with correct total
+                    self.total_chunks_signal.emit(total_chunks)
                 except Exception as e:
                     print(f"Error parsing chunk count: {e}")
-            elif "[STATUS] Completed chunk" in line or "[PROGRESS] " in line:
+                    
+            # Parse chunk counts for progress bar
+            if "[STATUS] Completed chunk" in line or "[PROGRESS] " in line:
                 try:
                     if "[STATUS] Completed chunk" in line:
                         parts = line.split()
@@ -641,6 +664,8 @@ class WorkerThread(QThread):
                         current_chunk = int(chunk_info[0])
                         if len(chunk_info) > 1 and chunk_info[1].isdigit():
                             total_chunks = int(chunk_info[1])
+                            if total_chunks > 0:
+                                self.total_chunks_signal.emit(total_chunks)
                     elif "[PROGRESS] " in line and "New highest sequence:" in line:
                         current_chunk = int(line.split("sequence:")[1].strip())
                     if current_chunk > 0 and total_chunks > 0:
@@ -696,11 +721,36 @@ class WorkerThread(QThread):
                 self.handshake_signal.emit("established")
                 self.status_signal.emit("Connection established")
             
-            # Track ACK sent
+            # Detect ACK sent - improved pattern matching
             ack_match = re.search(r"\[ACK\] Sending acknowledgment for chunk (\d+)", line_stripped)
             if ack_match:
-                chunk_num = int(ack_match.group(1))
-                self.ack_signal.emit(chunk_num)
+                try:
+                    chunk_num = int(ack_match.group(1))
+                    print(f"Receiver sent ACK for chunk {chunk_num}")
+                    self.ack_signal.emit(chunk_num)
+                except (ValueError, IndexError) as e:
+                    print(f"Error parsing ACK number: {e}")
+            
+            # Get total chunks information from various message patterns
+            chunk_total_match = re.search(r"Total: \d+/(\d+)", line_stripped)
+            if chunk_total_match:
+                try:
+                    total_chunks = int(chunk_total_match.group(1))
+                    self.total_chunks_signal.emit(total_chunks)
+                    print(f"Set total chunks from CHUNK message to {total_chunks}")
+                except Exception as e:
+                    print(f"Error parsing chunk total: {e}")
+            
+            # Also look for highest sequence numbers
+            highest_seq_match = re.search(r"New highest sequence: (\d+)", line_stripped)
+            if highest_seq_match:
+                try:
+                    highest_seq = int(highest_seq_match.group(1))
+                    # Use highest sequence as an estimate of total chunks if we don't have a better value
+                    self.total_chunks_signal.emit(highest_seq)
+                    print(f"Set total chunks estimate from highest sequence: {highest_seq}")
+                except Exception as e:
+                    print(f"Error parsing highest sequence: {e}")
             
             # Extract data content if present
             data_extracted = False
@@ -733,6 +783,8 @@ class WorkerThread(QThread):
                                     curr = int(parts[0].strip())
                                     tot = int(parts[1].strip())
                                     progress_tracker.update_from_counts(curr, tot)
+                                    # Also update the total chunks signal
+                                    self.total_chunks_signal.emit(tot)
                                     break
                                 except ValueError:
                                     pass
@@ -922,19 +974,6 @@ class SenderPanel(QWidget):
         self.chunk_size_spin.setSuffix(" bytes")
         form_layout.addRow("Chunk Size:", self.chunk_size_spin)
         
-        # Add new parameters for ACK system
-        self.ack_timeout_spin = QSpinBox()
-        self.ack_timeout_spin.setRange(1, 60)
-        self.ack_timeout_spin.setValue(DEFAULT_ACK_TIMEOUT)
-        self.ack_timeout_spin.setSuffix(" sec")
-        form_layout.addRow("ACK Timeout:", self.ack_timeout_spin)
-        
-        self.max_retries_spin = QSpinBox()
-        self.max_retries_spin.setRange(1, 50)
-        self.max_retries_spin.setValue(DEFAULT_MAX_RETRIES)
-        self.max_retries_spin.setSuffix(" tries")
-        form_layout.addRow("Max Retries:", self.max_retries_spin)
-        
         form_group.setLayout(form_layout)
         main_layout.addWidget(form_group)
         
@@ -1036,6 +1075,8 @@ class SenderPanel(QWidget):
             styled_message = f'<span style="color:{COLORS["handshake"]};">{message}</span>'
         elif "[ACK]" in message:
             styled_message = f'<span style="color:{COLORS["ack"]};">{message}</span>'
+        elif "[CONFIRMED]" in message:
+            styled_message = f'<span style="color:{COLORS["success"]};">{message}</span>'
             
         self.log_edit.append(styled_message)
         cursor = self.log_edit.textCursor()
@@ -1095,8 +1136,6 @@ class SenderPanel(QWidget):
             "input_file": input_file,
             "delay": self.delay_spin.value(),
             "chunk_size": self.chunk_size_spin.value(),
-            "ack_timeout": self.ack_timeout_spin.value(),
-            "max_retries": self.max_retries_spin.value()
         }
         
         if key_file:
@@ -1122,9 +1161,10 @@ class SenderPanel(QWidget):
         self.worker_thread.status_signal.connect(self.update_status)
         self.worker_thread.finished_signal.connect(self.transmission_finished)
         
-        # Connect new signals for handshake and ACK visualization
+        # Connect signals for handshake and ACK visualization
         self.worker_thread.handshake_signal.connect(self.update_handshake)
         self.worker_thread.ack_signal.connect(self.update_ack)
+        self.worker_thread.total_chunks_signal.connect(self.ack_panel.set_total_chunks)
         
         self.worker_thread.start()
     
@@ -1139,10 +1179,6 @@ class SenderPanel(QWidget):
             self.progress_bar.setValue(int(percentage))
             if self.parent:
                 self.parent.statusBar().showMessage(f"Sending: {current}/{total} chunks ({percentage:.1f}%)")
-                
-            # Update total chunks in ACK panel if needed
-            if total != self.ack_panel.total_chunks:
-                self.ack_panel.set_total_chunks(total)
     
     def update_status(self, status):
         self.status_label.setText(status)
@@ -1160,6 +1196,7 @@ class SenderPanel(QWidget):
     
     def update_ack(self, chunk_num):
         """Update the acknowledgment panel when a chunk is acknowledged."""
+        print(f"SenderPanel updating ACK for chunk {chunk_num}")
         self.ack_panel.acknowledge_chunk(chunk_num)
     
     def transmission_finished(self, success):
@@ -1183,8 +1220,6 @@ class SenderPanel(QWidget):
         settings.setValue("output_dir", self.output_dir_edit.text())
         settings.setValue("delay", self.delay_spin.value())
         settings.setValue("chunk_size", self.chunk_size_spin.value())
-        settings.setValue("ack_timeout", self.ack_timeout_spin.value())
-        settings.setValue("max_retries", self.max_retries_spin.value())
     
     def load_settings(self):
         settings = QSettings("CrypticRoute", "SenderPanel")
@@ -1204,18 +1239,6 @@ class SenderPanel(QWidget):
             self.chunk_size_spin.setValue(int(chunk_size))
         except:
             self.chunk_size_spin.setValue(DEFAULT_CHUNK_SIZE)
-            
-        ack_timeout = settings.value("ack_timeout", DEFAULT_ACK_TIMEOUT)
-        try:
-            self.ack_timeout_spin.setValue(float(ack_timeout))
-        except:
-            self.ack_timeout_spin.setValue(DEFAULT_ACK_TIMEOUT)
-            
-        max_retries = settings.value("max_retries", DEFAULT_MAX_RETRIES)
-        try:
-            self.max_retries_spin.setValue(int(max_retries))
-        except:
-            self.max_retries_spin.setValue(DEFAULT_MAX_RETRIES)
 
 class ReceiverPanel(QWidget):
     def __init__(self, parent=None):
@@ -1539,7 +1562,8 @@ class ReceiverPanel(QWidget):
                 print(f"Adding to data display: {data[:20]}{'...' if len(data) > 20 else ''}")
                 self.data_queue.put(data)
                 return
-            data_markers = ["[CHUNK] Data:", "Decoded data:", "Received chunk data:", "Data chunk", "CHUNK_DATA"]
+                
+            data_patterns = ["[CHUNK] Data:", "Decoded data:", "Received chunk data:", "Data chunk", "CHUNK_DATA"]
             for marker in data_patterns:
                 if marker in message:
                     data = message.split(marker, 1)[1].strip()
@@ -1657,9 +1681,10 @@ class ReceiverPanel(QWidget):
         self.worker_thread.status_signal.connect(self.update_status)
         self.worker_thread.finished_signal.connect(self.reception_finished)
         
-        # Connect new signals for handshake and ACK visualization
+        # Connect signals for handshake and ACK visualization
         self.worker_thread.handshake_signal.connect(self.update_handshake)
         self.worker_thread.ack_signal.connect(self.update_ack)
+        self.worker_thread.total_chunks_signal.connect(self.ack_panel.set_total_chunks)
         
         self.worker_thread.start()
     
@@ -1680,10 +1705,6 @@ class ReceiverPanel(QWidget):
                     self.parent.statusBar().showMessage(f"Receiving: {current}/{total} chunks ({percentage:.1f}%)")
                 else:
                     self.parent.statusBar().showMessage(f"Receiving: {percentage:.1f}%")
-                    
-            # Update total chunks in ACK panel if needed
-            if total != self.ack_panel.total_chunks:
-                self.ack_panel.set_total_chunks(total)
         except Exception as e:
             print(f"Error updating progress: {e}")
     
@@ -1703,6 +1724,7 @@ class ReceiverPanel(QWidget):
     
     def update_ack(self, chunk_num):
         """Update the acknowledgment panel when a chunk is acknowledged."""
+        print(f"ReceiverPanel updating ACK for chunk {chunk_num}")
         self.ack_panel.acknowledge_chunk(chunk_num)
     
     def reception_finished(self, success):
