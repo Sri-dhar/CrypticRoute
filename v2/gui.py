@@ -591,12 +591,15 @@ class WorkerThread(QThread):
         if output_dir:
             cmd.extend(["--output-dir", output_dir])
         cmd.extend(["--delay", str(delay), "--chunk-size", str(chunk_size)])
-        cmd.extend(["--ack-timeout", str(ack_timeout), "--max-retries", str(max_retries)])
+        
+        # Fix: Convert ack_timeout to integer before passing to command line
+        cmd.extend(["--ack-timeout", str(int(ack_timeout)), "--max-retries", str(max_retries)])
         
         self.status_signal.emit(f"Starting sender with command: {' '.join(cmd)}")
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         universal_newlines=True, bufsize=0,
                                         env=dict(os.environ, PYTHONUNBUFFERED="1"))
+    
         total_chunks = 0
         current_chunk = 0
         
@@ -920,9 +923,8 @@ class SenderPanel(QWidget):
         form_layout.addRow("Chunk Size:", self.chunk_size_spin)
         
         # Add new parameters for ACK system
-        self.ack_timeout_spin = QDoubleSpinBox()
-        self.ack_timeout_spin.setRange(0.5, 30.0)
-        self.ack_timeout_spin.setSingleStep(0.5)
+        self.ack_timeout_spin = QSpinBox()
+        self.ack_timeout_spin.setRange(1, 60)
         self.ack_timeout_spin.setValue(DEFAULT_ACK_TIMEOUT)
         self.ack_timeout_spin.setSuffix(" sec")
         form_layout.addRow("ACK Timeout:", self.ack_timeout_spin)
