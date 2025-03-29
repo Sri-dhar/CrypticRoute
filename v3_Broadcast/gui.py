@@ -801,16 +801,18 @@ class WorkerThread(QThread):
 			self.finished_signal.emit(False)
 
 	def run_sender(self):
-		target_ip = self.args.get("target_ip")
+		# Update the command construction for sender.py
 		input_file = self.args.get("input_file")
 		key_file = self.args.get("key_file")
 		delay = self.args.get("delay", DEFAULT_DELAY)
 		chunk_size = self.args.get("chunk_size", DEFAULT_CHUNK_SIZE)
+		interface = self.args.get("interface")
 		output_dir = self.args.get("output_dir")
 
-		cmd = ["python3", "sender.py", "--target", target_ip, "--input", input_file]
-		if key_file:
-			cmd.extend(["--key", key_file])
+		# Build command with proper arguments (no more --target)
+		cmd = ["python3", "sender.py", "--input", input_file, "--key", key_file]
+		if interface:
+			cmd.extend(["--interface", interface])
 		if output_dir:
 			cmd.extend(["--output-dir", output_dir])
 		cmd.extend(["--delay", str(delay), "--chunk-size", str(chunk_size)])
@@ -1308,9 +1310,11 @@ class SenderPanel(QWidget):
 		form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 		form_layout.setSpacing(10)
 
-		self.target_ip_edit = QLineEdit()
-		self.target_ip_edit.setPlaceholderText("Enter target IP address (e.g., 192.168.1.100)")
-		form_layout.addRow("Target IP:", self.target_ip_edit)
+		# Change target_ip to interface selection (similar to ReceiverPanel)
+		self.interface_combo = QComboBox()
+		self.interface_combo.addItem("default")
+		self.populate_interfaces() # Add this method to SenderPanel (copy from ReceiverPanel)
+		form_layout.addRow("Network Interface:", self.interface_combo)
 
 		input_layout = QHBoxLayout()
 		input_layout.setSpacing(8)
@@ -1463,6 +1467,32 @@ class SenderPanel(QWidget):
 		panel_layout.addWidget(scroll_area)
 		self.setLayout(panel_layout)
 
+	def populate_interfaces(self):
+		self.interface_combo.clear()
+		self.interface_combo.addItem("default")
+		try:
+			interfaces = netifaces.interfaces()
+			for iface in interfaces:
+				# Skip loopback and potentially virtual interfaces unless explicitly needed
+				if iface.startswith("lo") or "veth" in iface or "docker" in iface:
+					continue
+				try:
+					addrs = netifaces.ifaddresses(iface)
+					if netifaces.AF_INET in addrs:
+						ip = addrs[netifaces.AF_INET][0]['addr']
+						self.interface_combo.addItem(f"{iface} ({ip})")
+					else:
+						# Add interface even if no IPv4 found, might be IPv6 only
+						self.interface_combo.addItem(iface)
+				except Exception as iface_err:
+					print(f"Could not get address for {iface}: {iface_err}")
+					self.interface_combo.addItem(iface) # Add by name only
+		except ImportError:
+			self.add_log_message("ERROR: 'netifaces' library not found. Cannot list interfaces. Please install it (`pip install netifaces`).")
+		except Exception as e:
+			self.add_log_message(f"Error populating interfaces: {str(e)}")
+
+ 
 	def browse_input_file(self):
 		file_path, _ = QFileDialog.getOpenFileName(self, "Select Input File", "", "All Files (*)")
 		if file_path:
@@ -1599,12 +1629,19 @@ class SenderPanel(QWidget):
 				return
 
 		args = {
-			"target_ip": target_ip,
-			"input_file": input_file,
-			"delay": self.delay_spin.value(),
-			"chunk_size": self.chunk_size_spin.value(),
-		}
-
+        "input_file": input_file,
+        "delay": self.delay_spin.value(),
+        "chunk_size": self.chunk_size_spin.value(),
+    }
+    
+		# Get the interface if it's not default
+		interface_text = self.interface_combo.currentText()
+		if interface_text and interface_text != "default":
+			# Extract only the interface name (before parenthesis if present)
+			interface = interface_text.split('(')[0].strip()
+			args["interface"] = interface
+			print(f"Using interface: {interface}")
+		
 		if key_file:
 			args["key_file"] = key_file
 		if output_dir:
@@ -1727,7 +1764,7 @@ class SenderPanel(QWidget):
 
 	def save_settings(self):
 		settings = QSettings("CrypticRoute", "SenderPanel")
-		settings.setValue("target_ip", self.target_ip_edit.text())
+		settings.setValue("interface", self.interface_combo.currentText())
 		settings.setValue("input_file", self.input_file_edit.text())
 		settings.setValue("key_file", self.key_file_edit.text())
 		settings.setValue("output_dir", self.output_dir_edit.text())
@@ -1736,7 +1773,13 @@ class SenderPanel(QWidget):
 
 	def load_settings(self):
 		settings = QSettings("CrypticRoute", "SenderPanel")
-		self.target_ip_edit.setText(settings.value("target_ip", ""))
+		interface = settings.value("interface", "default")
+		# FindText might be slow if many interfaces, but fine here
+		index = self.interface_combo.findText(interface, Qt.MatchFlag.MatchContains)
+		if index >= 0:
+			self.interface_combo.setCurrentIndex(index)
+		else:
+			self.interface_combo.setCurrentIndex(0) # Fallback to default
 		self.input_file_edit.setText(settings.value("input_file", ""))
 		self.key_file_edit.setText(settings.value("key_file", ""))
 		self.output_dir_edit.setText(settings.value("output_dir", ""))
@@ -2008,7 +2051,6 @@ class ReceiverPanel(QWidget):
 		self.setLayout(panel_layout)
 
 	def populate_interfaces(self):
-		current_selection = self.interface_combo.currentText()
 		self.interface_combo.clear()
 		self.interface_combo.addItem("default")
 		try:
@@ -2032,13 +2074,6 @@ class ReceiverPanel(QWidget):
 			self.add_log_message("ERROR: 'netifaces' library not found. Cannot list interfaces. Please install it (`pip install netifaces`).")
 		except Exception as e:
 			self.add_log_message(f"Error populating interfaces: {str(e)}")
-
-		# Try to restore previous selection
-		index = self.interface_combo.findText(current_selection, Qt.MatchFlag.MatchContains) # More flexible matching
-		if index >= 0:
-			self.interface_combo.setCurrentIndex(index)
-		else:
-			self.interface_combo.setCurrentIndex(0) # Default to 'default'
 
 
 	def browse_output_file(self):
