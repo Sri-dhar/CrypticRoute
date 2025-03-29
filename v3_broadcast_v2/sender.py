@@ -145,6 +145,77 @@ def get_broadcast_address():
         log_debug(f"[DISCOVERY] Warning: Could not determine local broadcast address, using {default_broadcast}. Error: {e}")
         return default_broadcast
 
+# def discover_receiver(key_hash_hex, discovery_port, timeout):
+#     """Broadcasts a discovery beacon and listens for a response."""
+#     broadcast_addr = get_broadcast_address()
+#     key_hash = bytes.fromhex(key_hash_hex)
+#     beacon_payload = DISCOVERY_MAGIC_BEACON + key_hash
+
+#     print(f"[DISCOVERY] Starting discovery on UDP port {discovery_port}...")
+#     log_debug(f"[DISCOVERY] Starting discovery. Key hash: {key_hash_hex}")
+
+#     # Create UDP socket
+#     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+#     sock.settimeout(1.0) # Set a timeout for receiving ACKs (1 second)
+
+#     start_time = time.time()
+#     beacon_interval = 2 # Send beacon every 2 seconds
+#     last_beacon_time = 0
+
+#     try:
+#         while time.time() - start_time < timeout:
+#             # Send beacon periodically
+#             current_time = time.time()
+#             if current_time - last_beacon_time > beacon_interval:
+#                 print(f"[DISCOVERY] Sending beacon to {broadcast_addr}:{discovery_port}")
+#                 log_debug(f"[DISCOVERY] Sending beacon (payload: {beacon_payload.hex()})")
+#                 sock.sendto(beacon_payload, (broadcast_addr, discovery_port))
+#                 last_beacon_time = current_time
+
+#             # Listen for response
+#             try:
+#                 data, addr = sock.recvfrom(1024) # Buffer size 1024 bytes
+#                 log_debug(f"[DISCOVERY] Received UDP packet from {addr}: {data.hex()}")
+
+#                 # Check if it's the ACK we expect
+#                 if data.startswith(DISCOVERY_MAGIC_ACK):
+#                     received_hash = data[len(DISCOVERY_MAGIC_ACK):]
+#                     if received_hash == key_hash:
+#                         receiver_ip = addr[0]
+#                         print(f"[DISCOVERY] Success! Receiver found at {receiver_ip}")
+#                         log_debug(f"[DISCOVERY] Valid ACK received from {receiver_ip}. Discovery successful.")
+#                         sock.close()
+#                         return receiver_ip
+#                     else:
+#                         log_debug(f"[DISCOVERY] Received ACK with mismatching hash from {addr}. Ignoring.")
+#                 else:
+#                     log_debug(f"[DISCOVERY] Received non-ACK UDP packet from {addr}. Ignoring.")
+
+#             except socket.timeout:
+#                 # No response received within the timeout, loop will continue
+#                 log_debug("[DISCOVERY] Socket timeout while waiting for ACK. Will resend beacon.")
+#                 continue
+#             except Exception as e:
+#                 log_debug(f"[DISCOVERY] Error receiving UDP packet: {e}")
+#                 time.sleep(0.5) # Avoid busy-looping on error
+
+#         print("[DISCOVERY] Failed: Timeout waiting for receiver response.")
+#         log_debug("[DISCOVERY] Discovery timeout reached.")
+#         sock.close()
+#         return None
+
+#     except KeyboardInterrupt:
+#         print("\n[DISCOVERY] Discovery interrupted by user.")
+#         log_debug("[DISCOVERY] Discovery interrupted by user.")
+#         sock.close()
+#         return None
+#     except Exception as e:
+#         print(f"[DISCOVERY] An error occurred during discovery: {e}")
+#         log_debug(f"[DISCOVERY] An error occurred during discovery: {e}")
+#         sock.close()
+#         return None
+
 def discover_receiver(key_hash_hex, discovery_port, timeout):
     """Broadcasts a discovery beacon and listens for a response."""
     broadcast_addr = get_broadcast_address()
@@ -156,7 +227,23 @@ def discover_receiver(key_hash_hex, discovery_port, timeout):
 
     # Create UDP socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # Added for quicker restarts if needed
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+    # *** BIND the socket to receive the ACK ***
+    try:
+        # Bind to '' (all available interfaces) and the discovery port
+        sock.bind(('', discovery_port))
+        log_debug(f"[DISCOVERY] Sender socket bound to port {discovery_port} for receiving ACKs.")
+        print(f"[DISCOVERY] Sender listening for ACKs on port {discovery_port}")
+    except OSError as e:
+        print(f"[ERROR] Could not bind sender discovery socket to port {discovery_port}: {e}")
+        print("       Check if another process (maybe a previous run?) is using the port.")
+        log_debug(f"[DISCOVERY] Failed to bind sender socket: {e}")
+        sock.close()
+        return None
+    # *** End of BIND modification ***
+
     sock.settimeout(1.0) # Set a timeout for receiving ACKs (1 second)
 
     start_time = time.time()
@@ -170,7 +257,16 @@ def discover_receiver(key_hash_hex, discovery_port, timeout):
             if current_time - last_beacon_time > beacon_interval:
                 print(f"[DISCOVERY] Sending beacon to {broadcast_addr}:{discovery_port}")
                 log_debug(f"[DISCOVERY] Sending beacon (payload: {beacon_payload.hex()})")
-                sock.sendto(beacon_payload, (broadcast_addr, discovery_port))
+                try:
+                    sock.sendto(beacon_payload, (broadcast_addr, discovery_port))
+                except OSError as e:
+                     # Handle potential network errors during send, e.g., network unreachable
+                     print(f"[DISCOVERY] Warning: Error sending beacon: {e}")
+                     log_debug(f"[DISCOVERY] Error sending beacon: {e}")
+                     # Continue trying, maybe the network will recover
+                     time.sleep(1) # Wait a bit before next attempt
+                     continue # Skip receive attempt for this cycle
+
                 last_beacon_time = current_time
 
             # Listen for response
@@ -183,24 +279,30 @@ def discover_receiver(key_hash_hex, discovery_port, timeout):
                     received_hash = data[len(DISCOVERY_MAGIC_ACK):]
                     if received_hash == key_hash:
                         receiver_ip = addr[0]
-                        print(f"[DISCOVERY] Success! Receiver found at {receiver_ip}")
+                        print(f"\n[DISCOVERY] Success! Receiver ACK received from {receiver_ip}") # Added newline for clarity
                         log_debug(f"[DISCOVERY] Valid ACK received from {receiver_ip}. Discovery successful.")
                         sock.close()
                         return receiver_ip
                     else:
                         log_debug(f"[DISCOVERY] Received ACK with mismatching hash from {addr}. Ignoring.")
+                        print(f"[DISCOVERY] Ignored ACK from {addr[0]} (Hash mismatch)")
                 else:
                     log_debug(f"[DISCOVERY] Received non-ACK UDP packet from {addr}. Ignoring.")
+                    # Optional: print a message if you receive unexpected UDP traffic
+                    # print(f"[DISCOVERY] Ignored unexpected UDP packet from {addr[0]}")
+
 
             except socket.timeout:
-                # No response received within the timeout, loop will continue
+                # No response received within the timeout, loop will continue to send next beacon
                 log_debug("[DISCOVERY] Socket timeout while waiting for ACK. Will resend beacon.")
-                continue
+                continue # Explicitly continue to the start of the while loop
             except Exception as e:
                 log_debug(f"[DISCOVERY] Error receiving UDP packet: {e}")
+                print(f"[DISCOVERY] Error receiving packet: {e}")
                 time.sleep(0.5) # Avoid busy-looping on error
 
-        print("[DISCOVERY] Failed: Timeout waiting for receiver response.")
+        # If the loop finishes without returning, it timed out
+        print("\n[DISCOVERY] Failed: Timeout waiting for receiver response.") # Added newline
         log_debug("[DISCOVERY] Discovery timeout reached.")
         sock.close()
         return None
@@ -211,11 +313,16 @@ def discover_receiver(key_hash_hex, discovery_port, timeout):
         sock.close()
         return None
     except Exception as e:
-        print(f"[DISCOVERY] An error occurred during discovery: {e}")
+        print(f"\n[DISCOVERY] An error occurred during discovery: {e}") # Added newline
         log_debug(f"[DISCOVERY] An error occurred during discovery: {e}")
         sock.close()
         return None
 
+    finally:
+        # Ensure socket is closed if it exists and wasn't closed earlier
+        if 'sock' in locals() and sock.fileno() != -1:
+             sock.close()
+             log_debug("[DISCOVERY] Sender discovery socket closed in finally block.")
 class SteganographySender:
     """Simple steganography sender using only TCP with acknowledgment."""
 
