@@ -1598,10 +1598,7 @@ class SenderPanel(QWidget):
 			self.ack_status_window.activateWindow()
 
 	def start_transmission(self):
-		target_ip = self.target_ip_edit.text().strip()
-		if not target_ip:
-			QMessageBox.warning(self, "Input Error", "Target IP address is required.")
-			return
+    # Input file validation
 		input_file = self.input_file_edit.text().strip()
 		if not input_file:
 			QMessageBox.warning(self, "Input Error", "Input file is required.")
@@ -1609,10 +1606,14 @@ class SenderPanel(QWidget):
 		if not os.path.exists(input_file):
 			QMessageBox.warning(self, "Input Error", f"Input file does not exist: {input_file}")
 			return
+			
+		# Key file validation
 		key_file = self.key_file_edit.text().strip()
 		if key_file and not os.path.exists(key_file):
 			QMessageBox.warning(self, "Input Error", f"Key file does not exist: {key_file}")
 			return
+			
+		# Output directory validation
 		output_dir = self.output_dir_edit.text().strip()
 		if output_dir and not os.path.exists(output_dir):
 			response = QMessageBox.question(self, "Create Directory?",
@@ -1629,11 +1630,11 @@ class SenderPanel(QWidget):
 				return
 
 		args = {
-        "input_file": input_file,
-        "delay": self.delay_spin.value(),
-        "chunk_size": self.chunk_size_spin.value(),
-    }
-    
+			"input_file": input_file,
+			"delay": self.delay_spin.value(),
+			"chunk_size": self.chunk_size_spin.value(),
+		}
+		
 		# Get the interface if it's not default
 		interface_text = self.interface_combo.currentText()
 		if interface_text and interface_text != "default":
