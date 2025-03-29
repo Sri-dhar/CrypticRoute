@@ -201,6 +201,7 @@ class SteganographyReceiver:
         if response_pkt:
             log_debug(f"Sending Discovery Response to {probe_packet[IP].src}:{probe_packet[TCP].sport}")
             print(f"[DISCOVERY] Sending response to sender at {probe_packet[IP].src}")
+            print(f"[IP_EXCHANGE] Sending confirmation to {probe_packet[IP].src}:{probe_packet[TCP].sport}")
             # Send multiple times for reliability (as in v2)
             for _ in range(5):
                  send(response_pkt)
@@ -228,6 +229,7 @@ class SteganographyReceiver:
             if probe_hash_received == receiver_key_hash_probe_expected:
                 log_debug(f"Valid Discovery Probe received from {packet[IP].src}:{packet[TCP].sport}. Key hash MATCH.")
                 print(f"\n[DISCOVERY] Valid probe received from sender at {packet[IP].src}") # Newline for clarity
+                print(f"[IP_EXCHANGE] Sender IP identified: {packet[IP].src}:{packet[TCP].sport}")
 
                 # Store sender info from the probe
                 discovery_sender_ip = packet[IP].src
@@ -284,8 +286,7 @@ class SteganographyReceiver:
             return
 
         log_debug(f"Sending ACK for data chunk {seq_num} to {sender_ip}:{sender_port}")
-        # Print statement moved to process_packet for context
-        # print(f"[ACK] Sending acknowledgment for chunk {seq_num:04d}")
+        print(f"[ACK] Sending acknowledgment for chunk {seq_num}")
         self.log_ack(seq_num) # Log the ACK we are sending
 
         # Send the ACK packet multiple times for reliability (v1 logic)
@@ -324,8 +325,7 @@ class SteganographyReceiver:
             return
 
         log_debug(f"Sending SYN-ACK for connection establishment to {sender_ip}:{sender_port}")
-        # Print statement moved to process_packet for context
-        # print("[HANDSHAKE] Sending SYN-ACK response")
+        print(f"[HANDSHAKE] Sending SYN-ACK response to {sender_ip}:{sender_port}")
 
         # Send the SYN-ACK packet multiple times for reliability (v1 logic)
         for i in range(5):
@@ -386,6 +386,7 @@ class SteganographyReceiver:
             if not connection_established and packet[TCP].flags & 0x02 and packet[TCP].window == 0xDEAD:
                 log_debug(f"Received connection establishment request (SYN) from {current_sender_ip}:{current_sender_port}")
                 print(f"\n[HANDSHAKE] Received connection request (SYN) from {current_sender_ip}:{current_sender_port}")
+                print(f"[IP_EXCHANGE] Connection request from {current_sender_ip}:{current_sender_port}")
 
                 # Set sender IP and *PORT* based on this SYN packet
                 sender_ip = current_sender_ip # Should match discovery_sender_ip if check above passed
@@ -398,7 +399,8 @@ class SteganographyReceiver:
             # Check for final ACK confirming connection (from sender IP/Port, to our random port)
             if not connection_established and packet[TCP].flags & 0x10 and packet[TCP].window == 0xF00D and packet[TCP].dport == self.my_port:
                 log_debug(f"Received connection confirmation (ACK) from {current_sender_ip}:{current_sender_port}")
-                print("[HANDSHAKE] Connection established with sender")
+                print(f"[HANDSHAKE] Connection established with sender")
+                print(f"[IP_EXCHANGE] Connection confirmed with {current_sender_ip}:{current_sender_port}")
                 connection_established = True
                 return True # Packet processed
 
@@ -406,7 +408,7 @@ class SteganographyReceiver:
             # Check for FIN flag and special window value (must be from established sender)
             if connection_established and packet[TCP].flags & 0x01 and packet[TCP].window == 0xFFFF:
                 log_debug(f"Received transmission complete signal (FIN) from {current_sender_ip}:{current_sender_port}")
-                print("\n[COMPLETE] Received transmission complete signal") # Newline for clarity
+                print("\n[COMPLETE] Reception complete") # Newline for clarity
                 transmission_complete = True
                 return True # Packet processed, signal sniff to stop
 
@@ -486,7 +488,9 @@ class SteganographyReceiver:
                  # Print progress update (less frequently maybe?)
                  if valid_packet_counter % 5 == 0 or len(received_chunks) < 10:
                      progress = (len(received_chunks) / total_chunks) * 100 if total_chunks else 0
-                     print(f"[CHUNK] Rcvd: {seq_num:04d}/{total_chunks:04d} | Total: {len(received_chunks):04d}/{total_chunks:04d} | Progress: {progress:.1f}% ", end='\r', flush=True)
+                     print(f"[CHUNK] Received chunk {seq_num:04d}/{total_chunks:04d} | Total: {len(received_chunks):04d}/{total_chunks:04d} | Progress: {progress:.1f}% ", end='\r', flush=True)
+                     # Add a clear message in format expected by GUI
+                     print(f"[CHUNK] Received chunk {seq_num}/{total_chunks} | Progress: {progress:.1f}%")
 
                  return True # Processed a valid data chunk
 
@@ -659,6 +663,7 @@ def reassemble_data():
 
     # Process chunks in order, cleaning padding (detailed v1 logic)
     print("[REASSEMBLY] Cleaning received chunks (removing potential padding)...")
+    print(f"[PROGRESS] Processing received data | Total chunks: {len(received_chunks)}")
     cleaned_chunks = []
     num_sorted = len(sorted_seq_nums)
     for i, seq in enumerate(sorted_seq_nums):
@@ -957,7 +962,7 @@ def receive_file(output_path, key_path, interface=None, timeout=120): # key_path
         # Save final data (v1 logic)
         print(f"[SAVE] Saving {len(final_data_to_save)} bytes to {output_path}...")
         save_success = save_to_file(final_data_to_save, output_path)
-        print(f"[SAVE] File saved {'successfully' if save_success else 'with errors'}.")
+        print(f"[SAVE] File saved successfully")
         if not save_success:
             status = "failed_save"
             success = False # Override success if saving fails
