@@ -590,17 +590,20 @@ def receive_file(output_path, key_path=None, interface=None, timeout=120):
     stego = SteganographyReceiver()
 
     # Prepare key first for discovery
+        # Prepare key first for discovery
     key = None
     if key_path:
         log_debug(f"Reading key from: {key_path}")
         print(f"Reading key: {key_path}")
         try:
-            key_data = read_file(key_path, 'rb') # Use shared read_file helper? No, keep separate for now.
-            with open(key_path, 'rb') as key_file: key_data = key_file.read()
-            key = prepare_key(key_data) # Also derives identifiers
+            # Ensure the read_file call is removed or commented out.
+            # The 'with open' block below handles reading the key correctly.
+            with open(key_path, 'rb') as key_file:
+                key_data = key_file.read()
+            key = prepare_key(key_data) # This now also derives identifiers
         except Exception as e:
             log_debug(f"Error reading key file: {e}")
-            print(f"Error reading key file: {e}")
+            print(f"Error reading key file: {e}") # Print the specific error
             return False
     else:
         print("Error: Key file is required for discovery.")
