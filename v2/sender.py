@@ -352,8 +352,8 @@ class SteganographySender:
         max_retransmits = MAX_RETRANSMISSIONS
         
         # Give critical chunks more retransmission attempts
-        if seq_num in [1, 4, 7]:
-            max_retransmits = max_retransmits * 2
+        # if seq_num in [1, 4, 7]:
+        #     max_retransmits = max_retransmits * 2
         
         start_time = time.time()
         
@@ -626,21 +626,21 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     print(f"[PREP] Data split into {total_chunks} chunks")
     
     # Send "problematic" chunks first with extra attention
-    problem_chunks = [1, 4, 7]
-    log_debug("Sending priority chunks first...")
-    print("[PRIORITY] Sending priority chunks first...")
-    for seq_num in problem_chunks:
-        if seq_num <= total_chunks:
-            chunk = chunks[seq_num-1]
-            log_debug(f"Sending priority chunk {seq_num}")
-            print(f"[PRIORITY] Sending chunk {seq_num:04d}/{total_chunks:04d}")
+    # problem_chunks = [1, 4, 7]
+    # log_debug("Sending priority chunks first...")
+    # print("[PRIORITY] Sending priority chunks first...")
+    # for seq_num in problem_chunks:
+    #     if seq_num <= total_chunks:
+    #         chunk = chunks[seq_num-1]
+    #         log_debug(f"Sending priority chunk {seq_num}")
+    #         print(f"[PRIORITY] Sending chunk {seq_num:04d}/{total_chunks:04d}")
             
-            # Send with acknowledgment system
-            success = stego.send_chunk(chunk, seq_num, total_chunks)
-            if success:
-                print(f"[PRIORITY] Successfully sent chunk {seq_num:04d}")
-            else:
-                print(f"[PRIORITY] Warning: Chunk {seq_num:04d} may not have been received")
+    #         # Send with acknowledgment system
+    #         success = stego.send_chunk(chunk, seq_num, total_chunks)
+    #         if success:
+    #             print(f"[PRIORITY] Successfully sent chunk {seq_num:04d}")
+    #         else:
+    #             print(f"[PRIORITY] Warning: Chunk {seq_num:04d} may not have been received")
     
     # Now send all chunks in order with acknowledgment
     log_debug(f"Sending data to {target_ip}...")
@@ -652,9 +652,9 @@ def send_file(file_path, target_ip, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
         seq_num = i + 1  # Start from 1
         
         # Skip if it's a priority chunk (already sent with special attention)
-        if seq_num in problem_chunks:
-            print(f"[SKIP] Chunk {seq_num:04d} (already sent as priority)")
-            continue
+        # if seq_num in problem_chunks:
+        #     print(f"[SKIP] Chunk {seq_num:04d} (already sent as priority)")
+        #     continue
         
         # Send the chunk with acknowledgment
         print(f"[PROGRESS] Preparing chunk {seq_num:04d}/{total_chunks:04d}")
