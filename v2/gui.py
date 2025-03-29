@@ -1892,7 +1892,7 @@ class ReceiverPanel(QWidget):
 					print(f"Could not get address for {iface}: {iface_err}")
 					self.interface_combo.addItem(iface) # Add by name only
 		except ImportError:
-			 self.add_log_message("ERROR: 'netifaces' library not found. Cannot list interfaces. Please install it (`pip install netifaces`).")
+			self.add_log_message("ERROR: 'netifaces' library not found. Cannot list interfaces. Please install it (`pip install netifaces`).")
 		except Exception as e:
 			self.add_log_message(f"Error populating interfaces: {str(e)}")
 
