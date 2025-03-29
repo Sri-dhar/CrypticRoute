@@ -108,17 +108,17 @@ class HandshakeIndicator(QWidget):
         super().__init__(parent)
         self.setup_ui()
         self.reset()
+        # Initially hidden until connection starts
+        self.setVisible(False)
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
         
-        title_label = QLabel("Connection Status")
-        title_label.setStyleSheet(f"font-weight: bold; color: {COLORS['text']};")
-        layout.addWidget(title_label)
-        
+        # More compact layout
         stages_layout = QHBoxLayout()
+        stages_layout.setSpacing(3)
         
         # SYN Stage
         self.syn_indicator = QLabel("SYN")
@@ -128,14 +128,16 @@ class HandshakeIndicator(QWidget):
             color: {COLORS['text']};
             border: 1px solid {COLORS['secondary']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
+            font-size: 9pt;
         """)
         stages_layout.addWidget(self.syn_indicator)
         
         # Arrow 1
         arrow1 = QLabel("→")
         arrow1.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        arrow1.setFixedWidth(15)
         stages_layout.addWidget(arrow1)
         
         # SYN-ACK Stage
@@ -146,14 +148,16 @@ class HandshakeIndicator(QWidget):
             color: {COLORS['text']};
             border: 1px solid {COLORS['secondary']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 80px;
+            padding: 2px;
+            min-width: 60px;
+            font-size: 9pt;
         """)
         stages_layout.addWidget(self.syn_ack_indicator)
         
         # Arrow 2
         arrow2 = QLabel("→")
         arrow2.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        arrow2.setFixedWidth(15)
         stages_layout.addWidget(arrow2)
         
         # ACK Stage
@@ -164,20 +168,21 @@ class HandshakeIndicator(QWidget):
             color: {COLORS['text']};
             border: 1px solid {COLORS['secondary']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
+            font-size: 9pt;
         """)
         stages_layout.addWidget(self.ack_indicator)
         
-        # Final status
-        stages_layout.addStretch()
+        # Status with less space
         self.status_label = QLabel("Not Connected")
         self.status_label.setStyleSheet(f"""
             color: {COLORS['danger']};
             font-weight: bold;
-            padding: 5px;
+            padding: 2px;
+            font-size: 9pt;
         """)
-        stages_layout.addWidget(self.status_label)
+        stages_layout.addWidget(self.status_label, 1, alignment=Qt.AlignmentFlag.AlignRight)
         
         layout.addLayout(stages_layout)
         
@@ -188,114 +193,134 @@ class HandshakeIndicator(QWidget):
             color: {COLORS['text']};
             border: 1px solid {COLORS['secondary']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
+            font-size: 9pt;
         """)
         self.syn_ack_indicator.setStyleSheet(f"""
             background-color: {COLORS['light']};
             color: {COLORS['text']};
             border: 1px solid {COLORS['secondary']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 80px;
+            padding: 2px;
+            min-width: 60px;
+            font-size: 9pt;
         """)
         self.ack_indicator.setStyleSheet(f"""
             background-color: {COLORS['light']};
             color: {COLORS['text']};
             border: 1px solid {COLORS['secondary']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
+            font-size: 9pt;
         """)
         self.status_label.setText("Not Connected")
         self.status_label.setStyleSheet(f"""
             color: {COLORS['danger']};
             font-weight: bold;
-            padding: 5px;
+            padding: 2px;
+            font-size: 9pt;
         """)
+        # Hide the indicator again
+        self.setVisible(False)
     
     def set_syn_sent(self):
         """Mark the SYN stage as completed."""
+        # Make the indicator visible when connection starts
+        self.setVisible(True)
         self.syn_indicator.setStyleSheet(f"""
             background-color: {COLORS['handshake']};
             color: {COLORS['text_light']};
             border: 1px solid {COLORS['handshake']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
             font-weight: bold;
+            font-size: 9pt;
         """)
         self.status_label.setText("SYN Sent")
         self.status_label.setStyleSheet(f"""
             color: {COLORS['handshake']};
             font-weight: bold;
-            padding: 5px;
+            padding: 2px;
+            font-size: 9pt;
         """)
     
     def set_syn_ack_sent(self):
         """Mark the SYN-ACK stage as completed."""
+        self.setVisible(True)
         self.syn_ack_indicator.setStyleSheet(f"""
             background-color: {COLORS['handshake']};
             color: {COLORS['text_light']};
             border: 1px solid {COLORS['handshake']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 80px;
+            padding: 2px;
+            min-width: 60px;
             font-weight: bold;
+            font-size: 9pt;
         """)
         self.status_label.setText("SYN-ACK Sent")
         self.status_label.setStyleSheet(f"""
             color: {COLORS['handshake']};
             font-weight: bold;
-            padding: 5px;
+            padding: 2px;
+            font-size: 9pt;
         """)
     
     def set_ack_sent(self):
         """Mark the ACK stage as completed."""
+        self.setVisible(True)
         self.ack_indicator.setStyleSheet(f"""
             background-color: {COLORS['handshake']};
             color: {COLORS['text_light']};
             border: 1px solid {COLORS['handshake']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
             font-weight: bold;
+            font-size: 9pt;
         """)
     
     def set_connection_established(self):
         """Mark the connection as fully established."""
+        self.setVisible(True)
         self.syn_indicator.setStyleSheet(f"""
             background-color: {COLORS['success']};
             color: {COLORS['text_light']};
             border: 1px solid {COLORS['success']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
             font-weight: bold;
+            font-size: 9pt;
         """)
         self.syn_ack_indicator.setStyleSheet(f"""
             background-color: {COLORS['success']};
             color: {COLORS['text_light']};
             border: 1px solid {COLORS['success']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 80px;
+            padding: 2px;
+            min-width: 60px;
             font-weight: bold;
+            font-size: 9pt;
         """)
         self.ack_indicator.setStyleSheet(f"""
             background-color: {COLORS['success']};
             color: {COLORS['text_light']};
             border: 1px solid {COLORS['success']};
             border-radius: 4px;
-            padding: 5px;
-            min-width: 60px;
+            padding: 2px;
+            min-width: 40px;
             font-weight: bold;
+            font-size: 9pt;
         """)
         self.status_label.setText("Connected")
         self.status_label.setStyleSheet(f"""
             color: {COLORS['success']};
             font-weight: bold;
-            padding: 5px;
+            padding: 2px;
+            font-size: 9pt;
         """)
 
 class AcknowledgmentPanel(QWidget):
@@ -338,7 +363,7 @@ class AcknowledgmentPanel(QWidget):
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(self.grid_container)
-        scroll_area.setMaximumHeight(120)
+        scroll_area.setMaximumHeight(100)  # Reduced height for compactness
         scroll_area.setStyleSheet(f"""
             QScrollArea {{
                 border: 1px solid {COLORS['secondary']};
@@ -387,13 +412,13 @@ class AcknowledgmentPanel(QWidget):
             
             indicator = QLabel(f"{i+1}")
             indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            indicator.setFixedSize(QSize(30, 20))
+            indicator.setFixedSize(QSize(25, 18))  # Smaller size
             indicator.setStyleSheet(f"""
                 background-color: {COLORS['light']};
                 color: {COLORS['text']};
                 border: 1px solid {COLORS['secondary']};
                 border-radius: 2px;
-                font-size: 8pt;
+                font-size: 7pt;
             """)
             self.grid_layout.addWidget(indicator, row, col)
         
@@ -431,7 +456,7 @@ class AcknowledgmentPanel(QWidget):
                 color: {COLORS['text_light']};
                 border: 1px solid {COLORS['ack']};
                 border-radius: 2px;
-                font-size: 8pt;
+                font-size: 7pt;
                 font-weight: bold;
             """)
             print(f"Highlighted indicator for chunk {chunk_num} at position ({row}, {col})")
@@ -863,9 +888,19 @@ class SenderPanel(QWidget):
         self.load_settings()
     
     def setup_ui(self):
-        main_layout = QVBoxLayout()
+        # Create a scroll area to make the UI scrollable
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        
+        # Create a container widget for the scroll area
+        container_widget = QWidget()
+        
+        # Main layout for the container
+        main_layout = QVBoxLayout(container_widget)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
+        
         self.setStyleSheet(f"""
             QWidget {{
                 font-size: 10pt;
@@ -993,13 +1028,9 @@ class SenderPanel(QWidget):
         control_layout.addStretch()
         main_layout.addLayout(control_layout)
         
-        # Connection status indicator
-        connection_group = ModernGroupBox("Connection Status")
-        connection_layout = QVBoxLayout()
+        # Simplified Connection Status
         self.handshake_indicator = HandshakeIndicator()
-        connection_layout.addWidget(self.handshake_indicator)
-        connection_group.setLayout(connection_layout)
-        main_layout.addWidget(connection_group)
+        main_layout.addWidget(self.handshake_indicator)
         
         # ACK visualization
         ack_group = ModernGroupBox("Acknowledgment Status")
@@ -1039,7 +1070,14 @@ class SenderPanel(QWidget):
         log_group.setLayout(log_layout)
         main_layout.addWidget(log_group, 1)
         
-        self.setLayout(main_layout)
+        # Set the container as the scroll area's widget
+        scroll_area.setWidget(container_widget)
+        
+        # Main layout for this panel
+        panel_layout = QVBoxLayout(self)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.addWidget(scroll_area)
+        self.setLayout(panel_layout)
     
     def browse_input_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Input File", "", "All Files (*)")
@@ -1276,9 +1314,19 @@ class ReceiverPanel(QWidget):
             self.data_display.setText(error_msg)
     
     def setup_ui(self):
-        main_layout = QVBoxLayout()
+        # Create a scroll area to make the UI scrollable
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        
+        # Create a container widget for the scroll area
+        container_widget = QWidget()
+        
+        # Main layout for the container
+        main_layout = QVBoxLayout(container_widget)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
+        
         self.setStyleSheet(f"""
             QWidget {{
                 font-size: 10pt;
@@ -1413,20 +1461,8 @@ class ReceiverPanel(QWidget):
         main_layout.addLayout(control_layout)
         
         # Connection status indicator
-        connection_group = ModernGroupBox("Connection Status")
-        connection_layout = QVBoxLayout()
         self.handshake_indicator = HandshakeIndicator()
-        connection_layout.addWidget(self.handshake_indicator)
-        connection_group.setLayout(connection_layout)
-        main_layout.addWidget(connection_group)
-        
-        # ACK visualization
-        ack_group = ModernGroupBox("Acknowledgment Status")
-        ack_layout = QVBoxLayout()
-        self.ack_panel = AcknowledgmentPanel()
-        ack_layout.addWidget(self.ack_panel)
-        ack_group.setLayout(ack_layout)
-        main_layout.addWidget(ack_group)
+        main_layout.addWidget(self.handshake_indicator)
         
         # Progress bar
         progress_group = ModernGroupBox("Progress")
@@ -1491,7 +1527,14 @@ class ReceiverPanel(QWidget):
         splitter.setSizes([500, 500])
         main_layout.addWidget(splitter, 1)
         
-        self.setLayout(main_layout)
+        # Set the container as the scroll area's widget
+        scroll_area.setWidget(container_widget)
+        
+        # Main layout for this panel
+        panel_layout = QVBoxLayout(self)
+        panel_layout.setContentsMargins(0, 0, 0, 0)
+        panel_layout.addWidget(scroll_area)
+        self.setLayout(panel_layout)
     
     def populate_interfaces(self):
         current_selection = self.interface_combo.currentText()
@@ -1668,9 +1711,8 @@ class ReceiverPanel(QWidget):
         self.progress_bar.setValue(0)
         self.status_label.setText("Starting reception...")
         
-        # Reset visualization components
+        # Reset handshake indicator
         self.handshake_indicator.reset()
-        self.ack_panel.reset()
         
         self.receive_button.setEnabled(False)
         self.stop_button.setEnabled(True)
@@ -1681,10 +1723,8 @@ class ReceiverPanel(QWidget):
         self.worker_thread.status_signal.connect(self.update_status)
         self.worker_thread.finished_signal.connect(self.reception_finished)
         
-        # Connect signals for handshake and ACK visualization
+        # Connect signals for handshake visualization
         self.worker_thread.handshake_signal.connect(self.update_handshake)
-        self.worker_thread.ack_signal.connect(self.update_ack)
-        self.worker_thread.total_chunks_signal.connect(self.ack_panel.set_total_chunks)
         
         self.worker_thread.start()
     
@@ -1721,11 +1761,6 @@ class ReceiverPanel(QWidget):
             self.handshake_indicator.set_ack_sent()
         elif stage == "established":
             self.handshake_indicator.set_connection_established()
-    
-    def update_ack(self, chunk_num):
-        """Update the acknowledgment panel when a chunk is acknowledged."""
-        print(f"ReceiverPanel updating ACK for chunk {chunk_num}")
-        self.ack_panel.acknowledge_chunk(chunk_num)
     
     def reception_finished(self, success):
         self.receive_button.setEnabled(True)
