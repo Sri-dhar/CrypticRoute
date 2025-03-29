@@ -129,9 +129,17 @@ def setup_directories():
 
 def log_debug(message):
     """Write debug message to log file."""
-    with open(DEBUG_LOG, "a") as f:
-        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-        f.write(f"[{timestamp}] {message}\n")
+    # Check if DEBUG_LOG is initialized
+    if not DEBUG_LOG:
+        print(f"Debug log not initialized. Message: {message}")
+        return
+    try:
+        with open(DEBUG_LOG, "a") as f:
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            f.write(f"[{timestamp}] {message}\n")
+    except Exception as e:
+        print(f"Error writing to debug log {DEBUG_LOG}: {e}")
+
 
 def derive_key_identifiers(key):
     """Derive probe and response identifiers from the key."""
@@ -167,7 +175,8 @@ class SteganographySender:
         self.ack_processing_thread = None
         self.stop_ack_processing = threading.Event()
         self.discovery_listener_thread = None # Thread for discovery responses
-        self.stop_discovery_listener = threading.Event()
+        # *** FIX: Rename the event attribute ***
+        self.stop_discovery_listener_event = threading.Event()
 
     def start_discovery_listener(self):
         """Start a thread to listen for discovery response packets."""
@@ -175,15 +184,17 @@ class SteganographySender:
             target=self.discovery_listener_thread_func
         )
         self.discovery_listener_thread.daemon = True
-        self.stop_discovery_listener.clear()
+        # *** FIX: Use the renamed event ***
+        self.stop_discovery_listener_event.clear()
         self.discovery_listener_thread.start()
         log_debug("Started Discovery Response listener thread")
         print("[THREAD] Started Discovery Response listener thread")
 
-    def stop_discovery_listener(self):
+    def stop_discovery_listener(self): # This is the METHOD
         """Stop the discovery listener thread."""
         if self.discovery_listener_thread:
-            self.stop_discovery_listener.set()
+            # *** FIX: Use the renamed event ***
+            self.stop_discovery_listener_event.set()
             self.discovery_listener_thread.join(2)
             log_debug("Stopped Discovery Response listener thread")
             print("[THREAD] Stopped Discovery Response listener thread")
@@ -198,7 +209,8 @@ class SteganographySender:
                 filter=filter_str,
                 prn=self.process_discovery_response,
                 store=0,
-                stop_filter=lambda p: self.stop_discovery_listener.is_set()
+                # *** FIX: Use the renamed event ***
+                stop_filter=lambda p: self.stop_discovery_listener_event.is_set()
             )
         except Exception as e:
             log_debug(f"Error in Discovery Response listener thread: {e}")
@@ -224,7 +236,8 @@ class SteganographySender:
                 receiver_port = packet[TCP].sport # Store the port they *sent from* (the discovery port)
                 discovery_complete = True
                 self.target_ip = receiver_ip # Set the target IP for subsequent comms
-                self.stop_discovery_listener.set() # Stop this listener
+                # *** FIX: Use the renamed event ***
+                self.stop_discovery_listener_event.set() # Stop this listener
                 return True # Signal sniff to stop if needed
         return False
 
@@ -389,14 +402,16 @@ class SteganographySender:
 
                 # Send final ACK to complete handshake
                 ack_packet = self.create_ack_packet()
+                # Correct ACK number in final handshake ACK
                 if ack_packet:
-                    log_debug("Sending final ACK to complete handshake")
-                    print("[HANDSHAKE] Sending final ACK to complete connection")
-                    for i in range(5):
-                        send(ack_packet)
-                        time.sleep(0.1)
-                    connection_established = True
-                    print("[HANDSHAKE] Connection established successfully")
+                     ack_packet[TCP].ack = packet[TCP].seq + 1 # Ack the SYN-ACK's sequence number
+                     log_debug("Sending final ACK to complete handshake")
+                     print("[HANDSHAKE] Sending final ACK to complete connection")
+                     for i in range(5):
+                         send(ack_packet)
+                         time.sleep(0.1)
+                     connection_established = True
+                     print("[HANDSHAKE] Connection established successfully")
                 return True
 
             # Check for data chunk ACK (using the specific signature)
@@ -421,7 +436,7 @@ class SteganographySender:
              return False
         if seq_num in acked_chunks:
             log_debug(f"Chunk {seq_num} already acknowledged, skipping")
-            print(f"[SKIP] Chunk {seq_num:04d} already acknowledged")
+            # print(f"[SKIP] Chunk {seq_num:04d} already acknowledged") # Reduce noise
             return True
 
         packet = self.create_packet(data, seq_num, total_chunks)
@@ -432,7 +447,7 @@ class SteganographySender:
         waiting_for_ack = True
 
         log_debug(f"Sending chunk {seq_num}/{total_chunks} to {self.target_ip}")
-        print(f"[SEND] Chunk: {seq_num:04d}/{total_chunks:04d} | Progress: {(seq_num / total_chunks) * 100:.2f}%")
+        print(f"[SEND] Chunk: {seq_num:04d}/{total_chunks:04d} | Progress: {(seq_num / total_chunks) * 100:.2f}%", end='\r')
         send(packet)
 
         retransmit_count = 0
@@ -449,18 +464,18 @@ class SteganographySender:
             if waiting_for_ack:
                 retransmit_count += 1
                 log_debug(f"Retransmitting chunk {seq_num} (attempt {retransmit_count}/{max_retransmits})")
-                print(f"[RETRANSMIT] Chunk {seq_num:04d} | Attempt: {retransmit_count}/{max_retransmits}")
+                print(f"[RETRANSMIT] Chunk {seq_num:04d} | Attempt: {retransmit_count}/{max_retransmits}", end='\r')
                 send(packet)
 
         if waiting_for_ack:
             log_debug(f"Failed to get ACK for chunk {seq_num} after {max_retransmits} retransmissions")
-            print(f"[WARNING] No ACK received for chunk {seq_num:04d} after {max_retransmits} attempts")
+            print(f"\n[WARNING] No ACK received for chunk {seq_num:04d} after {max_retransmits} attempts")
             waiting_for_ack = False
             return False
 
         elapsed = time.time() - start_time
         log_debug(f"Chunk {seq_num} acknowledged after {retransmit_count} retransmissions ({elapsed:.2f}s)")
-        print(f"[CONFIRMED] Chunk {seq_num:04d} successfully delivered")
+        # print(f"[CONFIRMED] Chunk {seq_num:04d} successfully delivered") # Reduce noise
         return True
 
 # --- File Reading, Encryption, Chunking (Mostly Unchanged) ---
@@ -481,11 +496,24 @@ def prepare_key(key_data):
     """Prepare the encryption key and derive identifiers."""
     if isinstance(key_data, str): key_data = key_data.encode('utf-8')
     try:
-        if all(c in b'0123456789abcdefABCDEF' for c in key_data):
-            hex_str = key_data.decode('ascii')
-            key_data = bytes.fromhex(hex_str)
-            log_debug("Converted hex key string to bytes")
-    except: pass # Not hex
+        # Check if it's a hex string *before* trying to decode
+        is_hex = False
+        if isinstance(key_data, bytes):
+             try:
+                  # Try decoding as ascii first to check if it contains only hex chars
+                  hex_str = key_data.decode('ascii')
+                  if all(c in '0123456789abcdefABCDEF' for c in hex_str):
+                      is_hex = True
+             except UnicodeDecodeError:
+                  pass # Not ascii, definitely not hex string
+
+        if is_hex:
+             key_data = bytes.fromhex(hex_str)
+             log_debug("Converted hex key string to bytes")
+
+    except Exception as e:
+        log_debug(f"Could not check/convert hex key: {e}")
+        pass # Not hex or error occurred, use as is
 
     if len(key_data) < 32: key_data = key_data.ljust(32, b'\0')
     key_data = key_data[:32]
@@ -559,15 +587,15 @@ def discover_receiver(stego, timeout=DISCOVERY_TIMEOUT):
         if discovery_complete: break
 
 
-    stego.stop_discovery_listener() # Ensure listener stops
+    stego.stop_discovery_listener() # <<< Ensure method is called correctly now
 
     if discovery_complete:
         log_debug(f"Discovery successful after {time.time() - start_time:.2f}s. Receiver: {receiver_ip}:{receiver_port}")
-        print(f"[DISCOVERY] Success! Found receiver at {receiver_ip}")
+        print(f"\n[DISCOVERY] Success! Found receiver at {receiver_ip}")
         return True
     else:
         log_debug(f"Discovery timed out after {timeout}s.")
-        print("[DISCOVERY] Failed. No valid response received.")
+        print("\n[DISCOVERY] Failed. No valid response received.")
         return False
 
 
@@ -588,7 +616,8 @@ def establish_connection(stego):
     if not syn_packet: return False
 
     log_debug("Sending SYN packet")
-    print(f"[HANDSHAKE] Sending SYN packet to {stego.target_ip}:{receiver_port}...") # Target the port from SYN-ACK later
+    # Use the receiver_port discovered (initially 54321)
+    print(f"[HANDSHAKE] Sending SYN packet to {stego.target_ip}:{receiver_port}...")
 
     # Send SYN repeatedly, waiting for SYN-ACK (processed by ack_listener_thread)
     max_wait = 20
@@ -668,7 +697,7 @@ def send_file(file_path, interface, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
 
     # --- Data Transmission Phase ---
     log_debug(f"Reading file: {file_path}")
-    print(f"[FILE] Reading: {file_path}")
+    print(f"\n[FILE] Reading: {file_path}")
     file_data = read_file(file_path, 'rb')
     print(f"[FILE] Read {len(file_data)} bytes successfully")
 
@@ -712,22 +741,21 @@ def send_file(file_path, interface, key_path=None, chunk_size=MAX_CHUNK_SIZE, de
     for i, chunk in enumerate(chunks):
         seq_num = i + 1
         # Simple sending order for now, priority chunks concept removed for clarity
-        print(f"[PROGRESS] Preparing chunk {seq_num:04d}/{total_chunks:04d}")
+        # print(f"[PROGRESS] Preparing chunk {seq_num:04d}/{total_chunks:04d}") # Included in send_chunk print
         success = stego.send_chunk(chunk, seq_num, total_chunks)
-        progress = (seq_num / total_chunks) * 100
-        if success:
-            print(f"[STATUS] Completed chunk {seq_num:04d}/{total_chunks:04d} | Progress: {progress:.2f}%")
-        else:
-            print(f"[WARNING] Chunk {seq_num:04d} may not have been received | Progress: {progress:.2f}%")
+        # progress = (seq_num / total_chunks) * 100 # Included in send_chunk print
+        if not success:
+            # print(f"\n[WARNING] Chunk {seq_num:04d} may not have been received") # Printed in send_chunk
             transmission_success = False
+        # else: print(f"[STATUS] Completed chunk {seq_num:04d}/{total_chunks:04d} | Progress: {progress:.2f}%") # Reduce noise
         time.sleep(delay)
 
     # --- Completion ---
+    print("\n[COMPLETE] Sending transmission completion signals...") # Newline after progress bar
     completion_packet = stego.create_completion_packet()
-    print("[COMPLETE] Sending transmission completion signals...")
     for i in range(10):
         log_debug("Sending completion signal")
-        print(f"[COMPLETE] Sending signal {i+1}/10")
+        # print(f"[COMPLETE] Sending signal {i+1}/10") # Reduce noise
         send(completion_packet)
         time.sleep(0.2)
 
@@ -779,6 +807,7 @@ def main():
 
     global OUTPUT_DIR, ACK_WAIT_TIMEOUT, MAX_RETRANSMISSIONS, DISCOVERY_TIMEOUT
     if args.output_dir: OUTPUT_DIR = args.output_dir
+    # Setup directories early to ensure DEBUG_LOG is available
     setup_directories()
 
     ACK_WAIT_TIMEOUT = args.ack_timeout
