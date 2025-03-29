@@ -1,54 +1,53 @@
-import socket
+from scapy.all import *
+import time
 
-def receiver():
-    # Get own IP by connecting to an external server (doesn't send any data)
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.connect(("8.8.8.8", 80))
-    own_ip = s.getsockname()[0]
-    s.close()
-    
-    # Create socket for receiving broadcast
-    receive_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    receive_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    receive_socket.bind(('0.0.0.0', 5000))  # Bind to all interfaces
-    
-    print("Listening for broadcast messages...")
-    receive_socket.settimeout(60)  # Set timeout to 60 seconds
-    
-    try:
-        # Wait for broadcast from sender
-        data, addr = receive_socket.recvfrom(1024)
-        sender_message = data.decode()
-        print(f"Received: {sender_message}")
+def get_own_ip():
+    """Get the IP address of this machine"""
+    return get_if_addr(conf.iface)
+
+def handle_broadcast_packet(packet):
+    """Handle received broadcast packet and send ACK"""
+    if packet.haslayer(IP) and packet.haslayer(UDP) and packet.haslayer(Raw):
+        raw_data = packet[Raw].load.decode()
         
-        # Parse sender IP and port from the message
-        sender_info = sender_message.split("from ")[1]
-        sender_ip, sender_port = sender_info.split(":")
-        sender_port = int(sender_port)
-        
-        # Send acknowledgment
-        print(f"Sending acknowledgment to {sender_ip}:{sender_port}")
-        ack_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        ack_socket.settimeout(30)  # Set timeout to 30 seconds
-        
-        try:
-            # Connect to sender and send acknowledgment
-            ack_socket.connect((sender_ip, sender_port))
-            ack_message = f"ACK from {own_ip}"
-            ack_socket.send(ack_message.encode())
+        # Check if this is our expected format
+        if raw_data.startswith("HELLO:"):
+            sender_ip = packet[IP].src
+            own_ip = get_own_ip()
             
-            # Print IP addresses
+            print(f"Received broadcast from {sender_ip}")
             print(f"My IP: {own_ip}")
             print(f"Sender IP: {sender_ip}")
-        except (socket.timeout, ConnectionRefusedError) as e:
-            print(f"Failed to connect to sender: {e}")
-        finally:
-            ack_socket.close()
-    except socket.timeout:
-        print("No broadcast message received within the timeout period.")
+            
+            # Create and send acknowledgment packet
+            ack_packet = (
+                IP(dst=sender_ip) /
+                UDP(sport=5000, dport=12345) /
+                Raw(load=f"ACK:{own_ip}")
+            )
+            
+            print(f"Sending acknowledgment to {sender_ip}")
+            send(ack_packet, verbose=0)
+            
+            return True
+    return False
+
+def receiver():
+    own_ip = get_own_ip()
+    print(f"Receiver started with IP: {own_ip}")
+    print("Listening for broadcast messages...")
     
-    # Clean up
-    receive_socket.close()
+    try:
+        # Sniff for packets, stopping when we receive a valid broadcast and send ACK
+        sniff(
+            filter=f"udp and dst port 5000", 
+            timeout=60,
+            count=1,
+            prn=handle_broadcast_packet,
+            stop_filter=handle_broadcast_packet
+        )
+    except KeyboardInterrupt:
+        print("Receiver stopped by user")
 
 if __name__ == "__main__":
     receiver()
