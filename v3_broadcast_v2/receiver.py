@@ -177,7 +177,7 @@ def listen_for_discovery(key_path, discovery_timeout=300):
                     log_debug(f"Sent response to sender at {sender_ip}")
                     
                     # Set the global sender_ip variable
-                    global sender_ip
+                    # global sender_ip
                     sender_ip = sender_ip
                     
                     sock.close()
