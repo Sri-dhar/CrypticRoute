@@ -273,7 +273,8 @@ class SteganographySender:
             log_debug(f"  Flags={packet[TCP].flags}, Window={packet[TCP].window:#x}, SeqHash={response_hash_received.hex()}")
             if response_hash_received == sender_key_hash_response_expected:
                 log_debug(f"Valid Discovery Response received from {packet[IP].src}:{packet[TCP].sport}")
-                print(f"\n[DISCOVERY] Valid response received from {packet[IP].src}") # Newline to avoid overwriting progress
+                print(f"\n[DISCOVERY] Valid response received from {packet[IP].src}")
+                print(f"[IP_EXCHANGE] Receiver IP discovered: {packet[IP].src}")  # GUI compatible log
                 receiver_ip = packet[IP].src
                 # IMPORTANT: This is the *discovery* port the receiver is listening on.
                 # The port for *data* might change during handshake.
@@ -491,7 +492,8 @@ class SteganographySender:
             # Flags SYN(0x02) + ACK(0x10) = 0x12, Window 0xBEEF
             if not connection_established and packet[TCP].flags & 0x12 == 0x12 and packet[TCP].window == 0xBEEF:
                 log_debug(f"Received SYN-ACK for connection establishment from {packet[IP].src}:{packet[TCP].sport}")
-                print("[HANDSHAKE] Received SYN-ACK response")
+                print(f"[HANDSHAKE] Received SYN-ACK response from {packet[IP].src}:{packet[TCP].sport}")
+                print(f"[IP_EXCHANGE] Confirmed connection with {packet[IP].src}:{packet[TCP].sport}")
 
                 # --- Port Update Logic ---
                 # IMPORTANT: Update receiver_port to the source port of *this* SYN-ACK packet.
@@ -510,7 +512,7 @@ class SteganographySender:
                     syn_ack_seq = packet[TCP].seq
                     ack_packet[TCP].ack = syn_ack_seq + 1
                     log_debug(f"Sending final ACK (ack={ack_packet[TCP].ack:#x}) to complete handshake")
-                    print(f"[HANDSHAKE] Sending final ACK to {self.target_ip}:{receiver_port}")
+                    print(f"[HANDSHAKE] Sending final ACK")
 
                     # Send multiple times for reliability
                     for i in range(5):
@@ -519,7 +521,7 @@ class SteganographySender:
 
                     # Mark connection as established *after* sending final ACK
                     connection_established = True
-                    print("[HANDSHAKE] Connection established successfully")
+                    print(f"[HANDSHAKE] Connection established")
 
                 return True # Packet processed
 
@@ -539,8 +541,8 @@ class SteganographySender:
                 # If this is the chunk we're currently waiting for, clear the wait flag
                 if waiting_for_ack and seq_num == current_chunk_seq:
                     log_debug(f"Chunk {seq_num} acknowledged")
-                    # Suppress print here, let send_chunk handle progress updates
-                    # print(f"[ACK] Received acknowledgment for chunk {seq_num:04d}")
+                    print(f"[ACK] Received acknowledgment for chunk {seq_num}")
+                    print(f"[CONFIRMED] Chunk {seq_num} successfully delivered")
                     waiting_for_ack = False
 
                 return True # Packet processed
@@ -582,6 +584,8 @@ class SteganographySender:
         log_debug(f"Sending chunk {seq_num}/{total_chunks} to {self.target_ip}")
         # Use end='\r' for progress bar effect
         print(f"[SEND] Chunk: {seq_num:04d}/{total_chunks:04d} | Progress: {(seq_num / total_chunks) * 100:.2f}%", end='\r', flush=True)
+        # Add standardized progress message for GUI
+        print(f"[PROGRESS] Sending chunk {seq_num}/{total_chunks} | Progress: {(seq_num / total_chunks) * 100:.1f}%")
         send(packet)
 
         # Wait for ACK with retransmission (using original logic)
@@ -609,6 +613,8 @@ class SteganographySender:
                 log_debug(f"Retransmitting chunk {seq_num} to {self.target_ip} (attempt {retransmit_count}/{max_retransmits})")
                 # Update progress bar during retransmit
                 print(f"[RETRANSMIT] Chunk {seq_num:04d} | Attempt: {retransmit_count}/{max_retransmits} | Progress: {(seq_num / total_chunks) * 100:.2f}%", end='\r', flush=True)
+                # Add packet retransmission info for GUI
+                print(f"[PACKET] Retransmitting chunk {seq_num} | {retransmit_count}/{max_retransmits}")
                 send(packet)
 
         # Check result after loops
@@ -813,6 +819,7 @@ def establish_connection(stego):
 
     log_debug(f"Starting connection establishment with {stego.target_ip}:{receiver_port}")
     print(f"[HANDSHAKE] Initiating connection with discovered receiver {stego.target_ip}...")
+    print(f"[IP_EXCHANGE] Connecting to receiver at {stego.target_ip}:{receiver_port}")
 
     # Start ACK listener thread *now* that we know the target IP
     # This listener will handle the SYN-ACK and subsequent data ACKs
@@ -998,7 +1005,7 @@ def send_file(file_path, interface, key_path, chunk_size=MAX_CHUNK_SIZE, delay=0
          # For now, let's continue to send completion.
     else:
         log_debug(f"Payload split into {total_chunks} chunks")
-        print(f"[PREP] Payload split into {total_chunks} chunks")
+        print(f"[PREP] Data split into {total_chunks} chunks")
 
     # --- Phase 4: Data Transmission ---
     log_debug("Phase 4: Data Transmission")
@@ -1028,6 +1035,7 @@ def send_file(file_path, interface, key_path, chunk_size=MAX_CHUNK_SIZE, delay=0
         final_progress = (total_chunks / total_chunks) * 100 if total_chunks > 0 else 0
         status_char = "OK" if transmission_success else "PARTIAL"
         print(f"[SEND] Completed: {total_chunks:04d}/{total_chunks:04d} | Progress: {final_progress:.2f}% | Status: {status_char}   ") # Spaces to clear line
+        print(f"[PROGRESS] Completed {total_chunks}/{total_chunks} chunks | Progress: 100.0%")
 
     else:
         print("[TRANSMISSION] No data chunks were generated. Skipping data sending phase.")
@@ -1068,7 +1076,7 @@ def send_file(file_path, interface, key_path, chunk_size=MAX_CHUNK_SIZE, delay=0
 
 
     log_debug(f"Transmission status: {final_status}")
-    print(f"[COMPLETE] Transmission finished ({final_status}).")
+    print(f"[COMPLETE] Transmission successfully completed")
 
     # Save session completion info
     completion_info = {
