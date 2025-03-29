@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 CrypticRoute - Simplified Network Steganography Sender
-With organized file output structure, acknowledgment system, and dynamic IP discovery.
+With organized file output structure, acknowledgment system, and key-based discovery
 """
+
 import sys
 import os
 import argparse
@@ -13,10 +14,10 @@ import json
 import binascii
 import datetime
 import threading
-import socket # Added for UDP discovery
+import netifaces # Added for broadcast address
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
-from scapy.all import IP, TCP, send, sniff, conf
+from scapy.all import IP, TCP, send, sniff, conf, get_if_addr, get_if_hwaddr
 
 # Configure Scapy settings
 conf.verb = 0
@@ -26,43 +27,81 @@ MAX_CHUNK_SIZE = 8
 RETRANSMIT_ATTEMPTS = 5
 ACK_WAIT_TIMEOUT = 10  # Seconds to wait for an ACK before retransmission
 MAX_RETRANSMISSIONS = 10  # Maximum number of times to retransmit a chunk
-DISCOVERY_PORT = 54321    # UDP port for broadcast discovery
-BROADCAST_ADDR = "255.255.255.255" # Standard broadcast address
-KEY_HASH_ALGO = 'sha256'  # Algorithm for key hashing
+DISCOVERY_PORT = 54321 # Port for discovery probes/responses
+DISCOVERY_TIMEOUT = 30 # Seconds to wait for discovery response
 
 # Global variables for the acknowledgment system
-acked_chunks = set()  # Set of sequence numbers that have been acknowledged
+acked_chunks = set()
 connection_established = False
 waiting_for_ack = False
 current_chunk_seq = 0
-receiver_ip = None       # Will be discovered
-receiver_port = None     # Will be discovered (TCP port)
-stop_sniffing = False    # Used to stop Scapy ACK listener
+receiver_ip = None # Discovered receiver IP
+receiver_port = None # Discovered receiver port (from their response)
+stop_sniffing = False
+discovery_complete = False # Flag for discovery success
+sender_key_hash_probe = b'' # Derived from key
+sender_key_hash_response_expected = b'' # Derived from key
 
 # Output directory structure
 OUTPUT_DIR = "stealth_output"
-SESSION_DIR = ""  # Will be set based on timestamp
-LOGS_DIR = ""     # Will be set based on session dir
-DATA_DIR = ""     # Will be set based on session dir
-CHUNKS_DIR = ""   # Will be set based on session dir
+SESSION_DIR = ""
+LOGS_DIR = ""
+DATA_DIR = ""
+CHUNKS_DIR = ""
+DEBUG_LOG = ""
 
-# Debug log file
-DEBUG_LOG = ""  # Will be set based on logs dir
+def get_broadcast_address(interface=None):
+    """Gets the broadcast address for a given interface."""
+    try:
+        if interface:
+            if interface not in netifaces.interfaces():
+                 log_debug(f"Error: Interface '{interface}' not found.")
+                 print(f"Error: Interface '{interface}' not found. Available: {netifaces.interfaces()}")
+                 return None
+            addrs = netifaces.ifaddresses(interface)
+            if netifaces.AF_INET in addrs:
+                return addrs[netifaces.AF_INET][0].get('broadcast')
+            else:
+                log_debug(f"Warning: Interface '{interface}' has no IPv4 address.")
+                return None # Fallback or error needed
+        else:
+            # Try to guess default interface (more complex, simplified here)
+            gws = netifaces.gateways()
+            default_iface = gws['default'][netifaces.AF_INET][1]
+            if default_iface:
+                 log_debug(f"Guessed default interface: {default_iface}")
+                 addrs = netifaces.ifaddresses(default_iface)
+                 if netifaces.AF_INET in addrs:
+                     return addrs[netifaces.AF_INET][0].get('broadcast')
+            # Fallback if default guess fails
+            for iface in netifaces.interfaces():
+                 addrs = netifaces.ifaddresses(iface)
+                 if netifaces.AF_INET in addrs:
+                     bcast = addrs[netifaces.AF_INET][0].get('broadcast')
+                     # Avoid loopback
+                     if bcast and not addrs[netifaces.AF_INET][0].get('addr', '').startswith('127.'):
+                         log_debug(f"Using broadcast address from interface {iface}: {bcast}")
+                         return bcast
+        log_debug("Could not determine broadcast address.")
+        print("Error: Could not determine broadcast address. Please specify an interface with -I.")
+        return None
+    except Exception as e:
+        log_debug(f"Error getting broadcast address: {e}")
+        print(f"Error getting broadcast address: {e}")
+        return None # Default to limited broadcast as last resort? "255.255.255.255"
+
 
 def setup_directories():
     """Create organized directory structure for outputs."""
     global OUTPUT_DIR, SESSION_DIR, LOGS_DIR, DATA_DIR, CHUNKS_DIR, DEBUG_LOG
 
-    # Create main output directory if it doesn't exist
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
 
-    # Create a timestamped session directory
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     SESSION_DIR = os.path.join(OUTPUT_DIR, f"sender_session_{timestamp}")
     os.makedirs(SESSION_DIR)
 
-    # Create subdirectories
     LOGS_DIR = os.path.join(SESSION_DIR, "logs")
     DATA_DIR = os.path.join(SESSION_DIR, "data")
     CHUNKS_DIR = os.path.join(SESSION_DIR, "chunks")
@@ -71,143 +110,170 @@ def setup_directories():
     os.makedirs(DATA_DIR)
     os.makedirs(CHUNKS_DIR)
 
-    # Set debug log path
     DEBUG_LOG = os.path.join(LOGS_DIR, "sender_debug.log")
 
-    # Create or update symlink to the latest session for convenience
     latest_link = os.path.join(OUTPUT_DIR, "sender_latest")
-
-    # More robust handling of existing symlink
     try:
-        # Remove existing symlink if it exists
         if os.path.islink(latest_link):
             os.unlink(latest_link)
-        # If it's a regular file or directory, rename it
         elif os.path.exists(latest_link):
             backup_name = f"{latest_link}_{int(time.time())}"
             os.rename(latest_link, backup_name)
             print(f"Renamed existing file to {backup_name}")
-
-        # Create new symlink
-        # Use absolute path for symlink target
-        abs_session_dir = os.path.abspath(SESSION_DIR)
-        os.symlink(abs_session_dir, latest_link)
-        print(f"Created symlink: {latest_link} -> {abs_session_dir}")
+        os.symlink(SESSION_DIR, latest_link)
+        print(f"Created symlink: {latest_link} -> {SESSION_DIR}")
     except Exception as e:
         print(f"Warning: Could not create symlink: {e}")
-        # Continue without the symlink - this is not critical
 
     print(f"Created output directory structure at: {SESSION_DIR}")
 
-
 def log_debug(message):
     """Write debug message to log file."""
-    if not DEBUG_LOG: # Ensure log path is set
-        return
-    try:
-        with open(DEBUG_LOG, "a") as f:
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"[{timestamp}] {message}\n")
-    except Exception as e:
-        print(f"Error writing to debug log: {e}")
+    with open(DEBUG_LOG, "a") as f:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        f.write(f"[{timestamp}] {message}\n")
 
-def calculate_key_hash(key_data):
-    """Calculate the hash of the key."""
-    hasher = hashlib.new(KEY_HASH_ALGO)
-    hasher.update(key_data)
-    return hasher.hexdigest()
+def derive_key_identifiers(key):
+    """Derive probe and response identifiers from the key."""
+    global sender_key_hash_probe, sender_key_hash_response_expected
+    hasher = hashlib.sha256()
+    hasher.update(key)
+    full_hash = hasher.digest()
+    sender_key_hash_probe = full_hash[:4] # First 4 bytes for probe
+    sender_key_hash_response_expected = full_hash[4:8] # Next 4 bytes for expected response
+    log_debug(f"Derived Probe ID: {sender_key_hash_probe.hex()}")
+    log_debug(f"Derived Expected Response ID: {sender_key_hash_response_expected.hex()}")
 
 class SteganographySender:
-    """Simple steganography sender using only TCP with acknowledgment."""
+    """Simple steganography sender using TCP with acknowledgment and discovery."""
 
-    def __init__(self, tcp_source_port):
+    def __init__(self, broadcast_ip):
         """Initialize the sender."""
-        # Removed target_ip - will be discovered
-        self.source_port = tcp_source_port # Use the assigned/chosen port
-        log_debug(f"Sender initialized with TCP source port: {self.source_port}")
-        # Target IP and Port will be set later via set_receiver_info
-        self.target_ip = None
-        self.receiver_tcp_port = None
+        # self.target_ip = target_ip # Replaced by broadcast_ip for discovery
+        self.broadcast_ip = broadcast_ip
+        self.source_port = random.randint(10000, 60000)
+        self.target_ip = None # Will be set after discovery
 
-        # Create debug file for sent chunks
         chunks_json = os.path.join(LOGS_DIR, "sent_chunks.json")
-        with open(chunks_json, "w") as f:
-            f.write("{}")
+        with open(chunks_json, "w") as f: f.write("{}")
         self.sent_chunks = {}
         self.chunks_json_path = chunks_json
 
-        # Create debug file for received ACKs
         acks_json = os.path.join(LOGS_DIR, "received_acks.json")
-        with open(acks_json, "w") as f:
-            f.write("{}")
+        with open(acks_json, "w") as f: f.write("{}")
         self.acks_json_path = acks_json
         self.received_acks = {}
 
-        # Initialize values for packet processing threads
         self.ack_processing_thread = None
         self.stop_ack_processing = threading.Event()
+        self.discovery_listener_thread = None # Thread for discovery responses
+        self.stop_discovery_listener = threading.Event()
 
-    def set_receiver_info(self, ip, port):
-        """Set the discovered receiver IP and TCP port."""
-        global receiver_ip, receiver_port
-        self.target_ip = ip
-        self.receiver_tcp_port = port
-        receiver_ip = ip  # Update global as well for consistency if needed elsewhere
-        receiver_port = port
-        log_debug(f"Receiver info set: IP={self.target_ip}, TCP Port={self.receiver_tcp_port}")
-        print(f"[INFO] Target receiver confirmed: {self.target_ip}:{self.receiver_tcp_port}")
+    def start_discovery_listener(self):
+        """Start a thread to listen for discovery response packets."""
+        self.discovery_listener_thread = threading.Thread(
+            target=self.discovery_listener_thread_func
+        )
+        self.discovery_listener_thread.daemon = True
+        self.stop_discovery_listener.clear()
+        self.discovery_listener_thread.start()
+        log_debug("Started Discovery Response listener thread")
+        print("[THREAD] Started Discovery Response listener thread")
 
+    def stop_discovery_listener(self):
+        """Stop the discovery listener thread."""
+        if self.discovery_listener_thread:
+            self.stop_discovery_listener.set()
+            self.discovery_listener_thread.join(2)
+            log_debug("Stopped Discovery Response listener thread")
+            print("[THREAD] Stopped Discovery Response listener thread")
+
+    def discovery_listener_thread_func(self):
+        """Thread function to listen for discovery response packets."""
+        log_debug("Discovery Response listener thread started")
+        filter_str = f"tcp and dst port {self.source_port}"
+        log_debug(f"Sniffing for Discovery Response with filter: {filter_str}")
+        try:
+            sniff(
+                filter=filter_str,
+                prn=self.process_discovery_response,
+                store=0,
+                stop_filter=lambda p: self.stop_discovery_listener.is_set()
+            )
+        except Exception as e:
+            log_debug(f"Error in Discovery Response listener thread: {e}")
+        log_debug("Discovery Response listener thread stopped")
+
+    def process_discovery_response(self, packet):
+        """Process a received packet to check if it's our discovery response."""
+        global discovery_complete, receiver_ip, receiver_port, sender_key_hash_response_expected
+        if discovery_complete: # Already found receiver
+             return False
+
+        # Check for expected discovery response signature
+        # PSH-FIN, Window 0xCAFE, correct key hash part
+        if IP in packet and TCP in packet and packet[TCP].flags & 0x09 == 0x09 and packet[TCP].window == 0xCAFE:
+            # Compare the sequence number with the expected response hash
+            response_hash_received = packet[TCP].seq.to_bytes(4, 'big')
+            log_debug(f"Received potential discovery response from {packet[IP].src}:{packet[TCP].sport}")
+            log_debug(f"  Flags={packet[TCP].flags}, Window={packet[TCP].window:#x}, SeqHash={response_hash_received.hex()}")
+            if response_hash_received == sender_key_hash_response_expected:
+                log_debug(f"Valid Discovery Response received from {packet[IP].src}:{packet[TCP].sport}")
+                print(f"\n[DISCOVERY] Valid response received from {packet[IP].src}")
+                receiver_ip = packet[IP].src
+                receiver_port = packet[TCP].sport # Store the port they *sent from* (the discovery port)
+                discovery_complete = True
+                self.target_ip = receiver_ip # Set the target IP for subsequent comms
+                self.stop_discovery_listener.set() # Stop this listener
+                return True # Signal sniff to stop if needed
+        return False
+
+    def send_discovery_probe(self):
+        """Sends a discovery probe packet."""
+        global sender_key_hash_probe
+        probe_packet = IP(dst=self.broadcast_ip) / TCP(
+            sport=self.source_port,
+            dport=DISCOVERY_PORT,
+            flags="PU", # PSH | URG
+            window=0xFACE, # Magic value 1
+            seq=int.from_bytes(sender_key_hash_probe, 'big')
+        )
+        log_debug(f"Sending Discovery Probe to {self.broadcast_ip}:{DISCOVERY_PORT}")
+        send(probe_packet)
+
+
+    # --- Existing methods for ACKs, Chunks, etc. ---
 
     def start_ack_listener(self):
-        """Start a thread to listen for ACK packets using Scapy."""
-        if not self.target_ip or not self.receiver_tcp_port:
-            log_debug("Cannot start ACK listener: Receiver info not set.")
-            print("[ERROR] Cannot start ACK listener: Receiver info missing.")
-            return False
-
-        self.stop_ack_processing.clear() # Ensure flag is clear before starting
+        """Start a thread to listen for ACK packets (after discovery)."""
+        if not self.target_ip:
+             log_debug("Cannot start ACK listener: Receiver IP not discovered yet.")
+             return
         self.ack_processing_thread = threading.Thread(
             target=self.ack_listener_thread
         )
         self.ack_processing_thread.daemon = True
+        self.stop_ack_processing.clear()
         self.ack_processing_thread.start()
-        log_debug("Started Scapy ACK listener thread")
-        print("[THREAD] Started Scapy ACK listener thread")
-        return True
+        log_debug("Started ACK listener thread")
+        print("[THREAD] Started ACK listener thread")
 
     def stop_ack_listener(self):
         """Stop the ACK listener thread."""
-        global stop_sniffing
-        if self.ack_processing_thread and self.ack_processing_thread.is_alive():
-            log_debug("Stopping Scapy ACK listener thread...")
+        if self.ack_processing_thread:
             self.stop_ack_processing.set()
-            stop_sniffing = True # Also set global Scapy stop flag
-            self.ack_processing_thread.join(2)  # Wait up to 2 seconds for thread to finish
-            if self.ack_processing_thread.is_alive():
-                log_debug("Warning: ACK listener thread did not stop gracefully.")
-            else:
-                log_debug("Stopped Scapy ACK listener thread")
-                print("[THREAD] Stopped Scapy ACK listener thread")
-        else:
-            log_debug("ACK listener thread was not running or already stopped.")
-        # Reset flag
-        stop_sniffing = False
+            self.ack_processing_thread.join(2)
+            log_debug("Stopped ACK listener thread")
+            print("[THREAD] Stopped ACK listener thread")
 
     def ack_listener_thread(self):
-        """Thread function to listen for and process ACK packets using Scapy."""
+        """Thread function to listen for and process ACK packets."""
         global stop_sniffing
-
-        log_debug("Scapy ACK listener thread started")
-        if not self.target_ip or not self.receiver_tcp_port:
-             log_debug("ACK listener thread exiting: Receiver info missing.")
-             return
-
+        log_debug("ACK listener thread started")
+        # Filter for ACKs *from the discovered receiver* on our source port
+        filter_str = f"tcp and src host {self.target_ip} and dst port {self.source_port}"
+        log_debug(f"Sniffing for ACKs with filter: {filter_str}")
         try:
-            # Set up sniffing for TCP ACK packets from the receiver IP, destined for our source port
-            filter_str = f"tcp and src host {self.target_ip} and dst port {self.source_port}"
-            log_debug(f"Sniffing for ACKs with filter: {filter_str}")
-
-            # Start packet sniffing for ACKs
             sniff(
                 filter=filter_str,
                 prn=self.process_ack_packet,
@@ -215,13 +281,9 @@ class SteganographySender:
                 stop_filter=lambda p: stop_sniffing or self.stop_ack_processing.is_set()
             )
         except Exception as e:
-            # Avoid logging errors if it's just stopping
-            if not self.stop_ack_processing.is_set():
-                log_debug(f"Error in Scapy ACK listener thread: {e}")
-                print(f"[ERROR] Scapy ACK listener thread error: {e}")
-
-        log_debug("Scapy ACK listener thread finished.")
-
+            log_debug(f"Error in ACK listener thread: {e}")
+            print(f"[ERROR] ACK listener thread: {e}")
+        log_debug("ACK listener thread stopped")
 
     def log_chunk(self, seq_num, data):
         """Save chunk data to debug file."""
@@ -233,263 +295,175 @@ class SteganographySender:
         with open(self.chunks_json_path, "w") as f:
             json.dump(self.sent_chunks, f, indent=2)
 
-        # Also save the raw chunk data
         chunk_file = os.path.join(CHUNKS_DIR, f"chunk_{seq_num:03d}.bin")
-        with open(chunk_file, "wb") as f:
-            f.write(data)
+        with open(chunk_file, "wb") as f: f.write(data)
 
     def log_ack(self, seq_num):
         """Save received ACK to debug file."""
-        self.received_acks[str(seq_num)] = {
-            "timestamp": time.time()
-        }
+        self.received_acks[str(seq_num)] = { "timestamp": time.time() }
         with open(self.acks_json_path, "w") as f:
             json.dump(self.received_acks, f, indent=2)
 
     def create_syn_packet(self):
-        """Create a SYN packet for connection establishment."""
-        if not self.target_ip or not self.receiver_tcp_port:
-            log_debug("Cannot create SYN - receiver information missing")
-            return None
-
-        # Create a SYN packet with special markers, target the discovered receiver port
+        """Create a SYN packet for connection establishment to discovered receiver."""
+        if not self.target_ip: return None # Should be discovered by now
         syn_packet = IP(dst=self.target_ip) / TCP(
             sport=self.source_port,
-            dport=self.receiver_tcp_port, # Target the receiver's listening TCP port
-            seq=0x12345678,  # Fixed pattern for SYN
-            window=0xDEAD,   # Special window value for handshake
-            flags="S"        # SYN flag
+            # dport=random.randint(10000, 60000), # Maybe use the discovered port? Or random? Let's try random.
+            dport=receiver_port if receiver_port else random.randint(10000, 60000), # Send SYN *to the port they responded from*
+            seq=0x12345678,
+            window=0xDEAD,
+            flags="S"
         )
-        log_debug(f"Created SYN packet for {self.target_ip}:{self.receiver_tcp_port}")
         return syn_packet
 
     def create_ack_packet(self):
         """Create an ACK packet to complete connection establishment."""
-        if not self.target_ip or not self.receiver_tcp_port:
+        global receiver_ip, receiver_port # Should be set by now
+        if not receiver_ip or not receiver_port:
             log_debug("Cannot create ACK - receiver information missing")
             return None
-
-        # Create an ACK packet with special markers, target the discovered receiver port
-        ack_packet = IP(dst=self.target_ip) / TCP(
+        # The receiver's SYN-ACK will come from a *different* port than the discovery port
+        # We need to capture that port when processing SYN-ACK
+        ack_packet = IP(dst=receiver_ip) / TCP(
             sport=self.source_port,
-            dport=self.receiver_tcp_port, # Target the receiver's listening TCP port
-            seq=0x87654321,  # Fixed pattern for final ACK
-            ack=0xABCDEF12,  # Should match receiver's SYN-ACK seq number
-            window=0xF00D,   # Special window value for handshake completion
-            flags="A"        # ACK flag
+            dport=receiver_port, # This needs to be the port from the SYN-ACK, updated in process_ack_packet
+            seq=0x87654321,
+            ack=0xABCDEF12,
+            window=0xF00D,
+            flags="A"
         )
-        log_debug(f"Created final ACK packet for {self.target_ip}:{self.receiver_tcp_port}")
         return ack_packet
 
     def create_packet(self, data, seq_num, total_chunks):
         """Create a TCP packet with embedded data."""
-        if not self.target_ip:
-            log_debug("Cannot create data packet - target IP missing")
-            return None
+        if not self.target_ip: return None # Must have discovered receiver
+        if len(data) < MAX_CHUNK_SIZE: data = data.ljust(MAX_CHUNK_SIZE, b'\0')
+        elif len(data) > MAX_CHUNK_SIZE: data = data[:MAX_CHUNK_SIZE]
 
-        # Ensure data is exactly MAX_CHUNK_SIZE bytes
-        if len(data) < MAX_CHUNK_SIZE:
-            data = data.ljust(MAX_CHUNK_SIZE, b'\0')
-            log_debug(f"Padded chunk {seq_num} to {MAX_CHUNK_SIZE} bytes")
-        elif len(data) > MAX_CHUNK_SIZE:
-            data = data[:MAX_CHUNK_SIZE]
-            log_debug(f"Warning: Truncated chunk {seq_num} to {MAX_CHUNK_SIZE} bytes")
+        dst_port = random.randint(10000, 60000) # Random destination port for data
 
-
-        # Create random destination port for stealth (or use receiver's port?)
-        # Using random port might bypass stateful firewalls easier but looks less like a connection
-        # Let's stick to random for now as per original logic
-        dst_port = random.randint(10000, 60000)
-
-        # Embed first 4 bytes in sequence number and last 4 in ack number
         tcp_packet = IP(dst=self.target_ip) / TCP(
             sport=self.source_port,
-            dport=dst_port, # Random destination port
+            dport=dst_port,
             seq=int.from_bytes(data[0:4], byteorder='big'),
             ack=int.from_bytes(data[4:8], byteorder='big'),
-            window=seq_num,  # Put sequence number in window field
-            flags="S",       # SYN flag (as per original logic - acts as data carrier)
-            options=[('MSS', total_chunks)]  # Store total chunks in MSS option
+            window=seq_num,
+            flags="S", # Still use SYN for data packets in this simple model
+            options=[('MSS', total_chunks)]
         )
-
-        # Calculate and store checksum in IP ID field
         checksum = binascii.crc32(data) & 0xFFFF
         tcp_packet[IP].id = checksum
-
         return tcp_packet
 
     def create_completion_packet(self):
         """Create a packet signaling transmission completion."""
-        if not self.target_ip or not self.receiver_tcp_port:
-             log_debug("Cannot create completion packet - receiver info missing")
-             return None
-
-        # Send FIN to the receiver's actual TCP port
+        if not self.target_ip: return None
         tcp_packet = IP(dst=self.target_ip) / TCP(
             sport=self.source_port,
-            dport=self.receiver_tcp_port, # Target the actual receiver port
-            window=0xFFFF,  # Special value for completion
-            flags="FA"       # FIN-ACK packet signals completion gracefully
+            dport=random.randint(10000, 60000),
+            window=0xFFFF,
+            flags="F"
         )
-        log_debug(f"Created completion (FIN) packet for {self.target_ip}:{self.receiver_tcp_port}")
         return tcp_packet
 
     def process_ack_packet(self, packet):
-        """Process a received ACK packet (called by Scapy's sniff)."""
+        """Process a received ACK or SYN-ACK packet."""
         global waiting_for_ack, current_chunk_seq, acked_chunks
-        global connection_established # No need to check receiver_ip/port here, Scapy filter does it
+        global connection_established, receiver_ip, receiver_port # receiver_ip already known
 
-        # Check if it's a valid TCP packet (Scapy filter should ensure this)
-        if TCP in packet:
-            log_debug(f"Processing packet from {packet[IP].src}:{packet[TCP].sport} -> {packet[IP].dst}:{packet[TCP].dport}, Flags: {packet[TCP].flags}, Win: {packet[TCP].window}, Seq: {packet[TCP].seq}, Ack: {packet[TCP].ack}")
-
+        # Check if it's a valid TCP packet from the receiver
+        if IP in packet and TCP in packet and packet[IP].src == self.target_ip:
             # Check for SYN-ACK packet (connection establishment response)
-            # Filter should ensure it's from receiver IP and to our source port
-            if not connection_established and packet[TCP].flags.SA and packet[TCP].window == 0xBEEF:
+            # Note: Receiver port might change here from the discovery port!
+            if not connection_established and packet[TCP].flags & 0x12 == 0x12 and packet[TCP].window == 0xBEEF:
                 log_debug(f"Received SYN-ACK for connection establishment from {packet[IP].src}:{packet[TCP].sport}")
                 print("[HANDSHAKE] Received SYN-ACK response")
 
-                # Verify source port matches discovered receiver TCP port
-                if packet[TCP].sport != self.receiver_tcp_port:
-                    log_debug(f"SYN-ACK source port mismatch! Expected {self.receiver_tcp_port}, got {packet[TCP].sport}")
-                    print("[WARNING] SYN-ACK source port mismatch!")
-                    # Don't proceed with handshake if port is wrong
-                    return False
+                # IMPORTANT: Update receiver_port to the source port of the SYN-ACK
+                new_receiver_port = packet[TCP].sport
+                if receiver_port != new_receiver_port:
+                     log_debug(f"Receiver port updated from {receiver_port} to {new_receiver_port} based on SYN-ACK")
+                     print(f"[INFO] Receiver handshake port: {new_receiver_port}")
+                     receiver_port = new_receiver_port # Update the port for future ACKs
 
                 # Send final ACK to complete handshake
                 ack_packet = self.create_ack_packet()
                 if ack_packet:
                     log_debug("Sending final ACK to complete handshake")
                     print("[HANDSHAKE] Sending final ACK to complete connection")
-
-                    # Send multiple times for reliability
                     for i in range(5):
                         send(ack_packet)
                         time.sleep(0.1)
-
-                    # Mark connection as established
                     connection_established = True
-                    log_debug("Connection marked as established")
                     print("[HANDSHAKE] Connection established successfully")
-                else:
-                     log_debug("Failed to create final ACK packet")
+                return True
 
-                return True # Handled SYN-ACK
-
-            # Check for data chunk ACK (special window value)
-            # Filter ensures it's from receiver IP and to our source port
-            if connection_established and packet[TCP].flags.A and packet[TCP].window == 0xCAFE:
-                # Extract the sequence number from the ack field
+            # Check for data chunk ACK (using the specific signature)
+            if connection_established and packet[TCP].flags & 0x10 and packet[TCP].window == 0xCAFE:
                 seq_num = packet[TCP].ack
-
-                # Verify source port matches discovered receiver TCP port
-                if packet[TCP].sport != self.receiver_tcp_port:
-                     log_debug(f"Data ACK source port mismatch! Expected {self.receiver_tcp_port}, got {packet[TCP].sport}. Ignoring ACK for {seq_num}.")
-                     return False # Ignore ACK from wrong port
-
-                # Check if already ACKed to prevent duplicate processing/logging
-                if seq_num not in acked_chunks:
-                    log_debug(f"Received valid ACK for chunk {seq_num} from {packet[IP].src}:{packet[TCP].sport}")
-                    self.log_ack(seq_num) # Log it
-
-                    # Add to acknowledged chunks
-                    acked_chunks.add(seq_num)
-
-                    # If this is the chunk we're currently waiting for, clear the wait flag
-                    if waiting_for_ack and seq_num == current_chunk_seq:
-                        log_debug(f"Chunk {seq_num} acknowledged, clearing wait flag.")
-                        print(f"[ACK] Received acknowledgment for chunk {seq_num:04d}")
-                        waiting_for_ack = False
-                    else:
-                         # Log if we receive an ACK for a chunk we weren't actively waiting for (e.g., late ACK)
-                         log_debug(f"Received ACK for chunk {seq_num}, but wasn't the one currently waited for (current: {current_chunk_seq if waiting_for_ack else 'None'}).")
-                else:
-                     log_debug(f"Ignoring duplicate ACK for chunk {seq_num}")
-
-
-                return True # Handled data ACK
-
-            # Log other packets received from receiver if needed
-            # else:
-            #    log_debug(f"Received other TCP packet from receiver: Flags={packet[TCP].flags}, Win={packet[TCP].window}")
-
-        return False # Packet not processed or not relevant
-
+                log_debug(f"Received ACK for chunk {seq_num} from port {packet[TCP].sport}")
+                self.log_ack(seq_num)
+                acked_chunks.add(seq_num)
+                if waiting_for_ack and seq_num == current_chunk_seq:
+                    log_debug(f"Chunk {seq_num} acknowledged")
+                    print(f"[ACK] Received acknowledgment for chunk {seq_num:04d}")
+                    waiting_for_ack = False
+                return True
+        return False
 
     def send_chunk(self, data, seq_num, total_chunks):
         """Send a data chunk with acknowledgment and retransmission."""
         global waiting_for_ack, current_chunk_seq
 
-        # Skip if this chunk has already been acknowledged
+        if not self.target_ip:
+             log_debug("Cannot send chunk: Receiver not discovered.")
+             return False
         if seq_num in acked_chunks:
-            log_debug(f"Chunk {seq_num} already acknowledged, skipping send")
-            # print(f"[SKIP] Chunk {seq_num:04d} already acknowledged") # Reduce noise
+            log_debug(f"Chunk {seq_num} already acknowledged, skipping")
+            print(f"[SKIP] Chunk {seq_num:04d} already acknowledged")
             return True
 
-        # Create the packet
         packet = self.create_packet(data, seq_num, total_chunks)
-        if not packet:
-             log_debug(f"Failed to create packet for chunk {seq_num}. Aborting chunk send.")
-             return False
+        if not packet: return False # Should not happen if discovered
 
-        # Log the chunk being sent
         self.log_chunk(seq_num, data)
-
-        # Set current chunk and waiting flag
         current_chunk_seq = seq_num
         waiting_for_ack = True
 
-        # Initial transmission
-        log_debug(f"Sending chunk {seq_num}/{total_chunks}")
-        print(f"[SEND] Chunk: {seq_num:04d}/{total_chunks:04d} | Progress: {(seq_num / total_chunks * 100) if total_chunks > 0 else 0:.2f}%")
+        log_debug(f"Sending chunk {seq_num}/{total_chunks} to {self.target_ip}")
+        print(f"[SEND] Chunk: {seq_num:04d}/{total_chunks:04d} | Progress: {(seq_num / total_chunks) * 100:.2f}%")
         send(packet)
 
-        # Wait for ACK with retransmission
         retransmit_count = 0
         max_retransmits = MAX_RETRANSMISSIONS
         start_time = time.time()
 
         while waiting_for_ack and retransmit_count < max_retransmits:
-            # Use event wait with timeout for ACK signal
-            ack_received = not waiting_for_ack # Check if ACK arrived while preparing
-            if not ack_received:
-                 # Simple sleep-based wait
-                 wait_start = time.time()
-                 while time.time() - wait_start < ACK_WAIT_TIMEOUT:
-                     if not waiting_for_ack: # Check flag modified by listener thread
-                         ack_received = True
-                         break
-                     time.sleep(0.1) # Small sleep
+            wait_time = 0
+            while waiting_for_ack and wait_time < ACK_WAIT_TIMEOUT:
+                time.sleep(0.1)
+                wait_time += 0.1
+                if not waiting_for_ack: break
 
-            # If ACK was received, break the retransmit loop
-            if ack_received:
-                log_debug(f"ACK for chunk {seq_num} detected within wait period.")
-                break
-
-            # If we're still waiting for ACK after timeout, retransmit
-            if waiting_for_ack: # Check flag again after wait
+            if waiting_for_ack:
                 retransmit_count += 1
-                log_debug(f"Retransmitting chunk {seq_num} (attempt {retransmit_count}/{max_retransmits}) - ACK timeout")
-                print(f"[RETRANSMIT] Chunk {seq_num:04d} | Attempt: {retransmit_count}/{max_retransmits} (Timeout: {ACK_WAIT_TIMEOUT}s)")
+                log_debug(f"Retransmitting chunk {seq_num} (attempt {retransmit_count}/{max_retransmits})")
+                print(f"[RETRANSMIT] Chunk {seq_num:04d} | Attempt: {retransmit_count}/{max_retransmits}")
                 send(packet)
-            else:
-                 # This case should ideally be caught by the 'ack_received' break above
-                 log_debug(f"ACK for chunk {seq_num} arrived just before retransmit attempt {retransmit_count+1}.")
-                 break # Ensure we exit if ACK arrived very late
 
-        # Check final status after the loop
         if waiting_for_ack:
-            # We've exhausted retransmissions and still no ACK
             log_debug(f"Failed to get ACK for chunk {seq_num} after {max_retransmits} retransmissions")
             print(f"[WARNING] No ACK received for chunk {seq_num:04d} after {max_retransmits} attempts")
-            waiting_for_ack = False  # Reset wait flag anyway
-            return False # Indicate failure for this chunk
-        else:
-            # Success - chunk was acknowledged
-            elapsed = time.time() - start_time
-            log_debug(f"Chunk {seq_num} confirmed acknowledged after {retransmit_count} retransmissions ({elapsed:.2f}s)")
-            # print(f"[CONFIRMED] Chunk {seq_num:04d} successfully delivered") # Reduce noise
-            return True # Indicate success
+            waiting_for_ack = False
+            return False
+
+        elapsed = time.time() - start_time
+        log_debug(f"Chunk {seq_num} acknowledged after {retransmit_count} retransmissions ({elapsed:.2f}s)")
+        print(f"[CONFIRMED] Chunk {seq_num:04d} successfully delivered")
+        return True
+
+# --- File Reading, Encryption, Chunking (Mostly Unchanged) ---
 
 def read_file(file_path, mode='rb'):
     """Read a file and return its contents."""
@@ -498,619 +472,332 @@ def read_file(file_path, mode='rb'):
             data = file.read()
             log_debug(f"Read {len(data)} bytes from {file_path}")
             return data
-    except FileNotFoundError:
-        log_debug(f"Error: File not found at {file_path}")
-        print(f"Error: File not found at {file_path}")
-        sys.exit(1)
     except Exception as e:
         log_debug(f"Error reading file {file_path}: {e}")
         print(f"Error reading file {file_path}: {e}")
         sys.exit(1)
 
-
 def prepare_key(key_data):
-    """Prepare the encryption key in correct format."""
-    log_debug(f"Preparing key data (type: {type(key_data)}, len: {len(key_data)})")
-    # If it's a string, convert to bytes
-    if isinstance(key_data, str):
-        log_debug("Key data is string, encoding to utf-8")
-        key_data = key_data.encode('utf-8')
+    """Prepare the encryption key and derive identifiers."""
+    if isinstance(key_data, str): key_data = key_data.encode('utf-8')
+    try:
+        if all(c in b'0123456789abcdefABCDEF' for c in key_data):
+            hex_str = key_data.decode('ascii')
+            key_data = bytes.fromhex(hex_str)
+            log_debug("Converted hex key string to bytes")
+    except: pass # Not hex
 
-    # Check if it's a hex string and convert if needed
-    is_hex = False
-    if isinstance(key_data, bytes):
-        try:
-            ascii_str = key_data.decode('ascii')
-            if all(c in '0123456789abcdefABCDEF' for c in ascii_str):
-                 if len(ascii_str) % 2 == 0:
-                    key_data = bytes.fromhex(ascii_str)
-                    log_debug("Converted presumed hex key string to bytes")
-                    print("Interpreted key file content as hex string")
-                    is_hex = True
-                 else:
-                    log_debug("Odd length hex string found, treating as raw bytes")
-        except UnicodeDecodeError:
-            log_debug("Key data not ASCII, treating as raw bytes")
-        except ValueError:
-             log_debug("Key data contains non-hex chars, treating as raw bytes")
+    if len(key_data) < 32: key_data = key_data.ljust(32, b'\0')
+    key_data = key_data[:32]
+    log_debug(f"Final key: {key_data.hex()}")
 
-    # Ensure key is 32 bytes (256 bits) for AES-256 ONLY IF it wasn't hex
-    if not is_hex and len(key_data) != 32:
-         log_debug(f"Key length is {len(key_data)}, adjusting to 32 bytes.")
-         if len(key_data) < 32:
-             key_data = key_data.ljust(32, b'\0')
-             log_debug(f"Key padded to 32 bytes.")
-         else:
-            key_data = key_data[:32]
-            log_debug(f"Key truncated to 32 bytes.")
-
-    # Final check after potential padding/truncation
-    if len(key_data) != 32:
-         log_debug(f"Error: Final key length is not 32 bytes ({len(key_data)}). Required for AES-256.")
-         print(f"Error: Key processing resulted in a key of length {len(key_data)} bytes. AES-256 requires exactly 32 bytes.")
-         print("Exiting due to invalid key length.")
-         sys.exit(1)
-
-    log_debug(f"Final key (hex): {key_data.hex()}")
-
-    # Save key for debugging
     key_file = os.path.join(DATA_DIR, "key.bin")
-    with open(key_file, "wb") as f:
-        f.write(key_data)
+    with open(key_file, "wb") as f: f.write(key_data)
+
+    # Derive identifiers needed for discovery
+    derive_key_identifiers(key_data)
 
     return key_data
-
 
 def encrypt_data(data, key):
     """Encrypt data using AES."""
     try:
-        # Generate a random IV for each encryption for security
-        iv = os.urandom(16) # AES block size for IV
-        log_debug(f"Generated random IV: {iv.hex()}")
-
-        # Save IV for debugging
+        iv = os.urandom(16) # Use random IV for actual encryption
+        log_debug(f"Using IV: {iv.hex()}")
         iv_file = os.path.join(DATA_DIR, "iv.bin")
-        with open(iv_file, "wb") as f:
-            f.write(iv)
+        with open(iv_file, "wb") as f: f.write(iv)
 
-        # Initialize AES cipher with key and IV
         cipher = Cipher(algorithms.AES(key), modes.CFB(iv), backend=default_backend())
         encryptor = cipher.encryptor()
-
-        # Encrypt the data
         encrypted_data = encryptor.update(data) + encryptor.finalize()
-        log_debug(f"Encryption successful. Input size: {len(data)}, Output size: {len(encrypted_data)}")
 
-
-        # Save original and encrypted data for debugging
         original_file = os.path.join(DATA_DIR, "original_data.bin")
-        with open(original_file, "wb") as f:
-            f.write(data)
+        with open(original_file, "wb") as f: f.write(data)
+        encrypted_file = os.path.join(DATA_DIR, "encrypted_data.bin")
+        with open(encrypted_file, "wb") as f: f.write(encrypted_data)
+        package_file = os.path.join(DATA_DIR, "encrypted_package.bin")
+        with open(package_file, "wb") as f: f.write(iv + encrypted_data)
 
-        encrypted_file = os.path.join(DATA_DIR, "encrypted_data_only.bin")
-        with open(encrypted_file, "wb") as f:
-            f.write(encrypted_data)
-
-        # Save a complete package (IV + encrypted data) for debugging
-        package_file = os.path.join(DATA_DIR, "encrypted_package_iv_prepended.bin")
-        with open(package_file, "wb") as f:
-            f.write(iv + encrypted_data)
-
-        log_debug(f"Original data head (hex): {data[:32].hex()}...")
-        log_debug(f"Encrypted data head (hex): {encrypted_data[:32].hex()}...")
-
-        # Prepend IV to the encrypted data for use in decryption
-        final_package = iv + encrypted_data
-        log_debug(f"Final package size (IV + data): {len(final_package)}")
-        return final_package
-
+        log_debug(f"Original data size: {len(data)}")
+        log_debug(f"Encrypted data size: {len(encrypted_data)}")
+        return iv + encrypted_data
     except Exception as e:
         log_debug(f"Encryption error: {e}")
         print(f"Encryption error: {e}")
-        # Exit or return None? Exit is safer if encryption fails.
         sys.exit(1)
 
 
 def chunk_data(data, chunk_size=MAX_CHUNK_SIZE):
-    """Split data into chunks of specified size."""
+    """Split data into chunks."""
     chunks = [data[i:i+chunk_size] for i in range(0, len(data), chunk_size)]
     log_debug(f"Split data into {len(chunks)} chunks of max size {chunk_size}")
-
-    # Save chunk details for debugging (only first/last few chunks maybe)
-    chunk_info = {}
-    limit = 10
-    if len(chunks) <= 2 * limit:
-         chunk_info = {i+1: {"size": len(chunk), "hex_preview": chunk[:8].hex()} for i, chunk in enumerate(chunks)}
-    else:
-         for i in range(limit):
-             chunk_info[i+1] = {"size": len(chunks[i]), "hex_preview": chunks[i][:8].hex()}
-         chunk_info["..."] = "..."
-         for i in range(len(chunks) - limit, len(chunks)):
-             chunk_info[i+1] = {"size": len(chunks[i]), "hex_preview": chunks[i][:8].hex()}
-
-
-    chunks_json = os.path.join(LOGS_DIR, "chunks_info_preview.json")
-    with open(chunks_json, "w") as f:
-        json.dump(chunk_info, f, indent=2)
-
+    chunk_info = {i+1: {"size": len(chunk), "data": chunk.hex()} for i, chunk in enumerate(chunks)}
+    chunks_json = os.path.join(LOGS_DIR, "chunks_info.json")
+    with open(chunks_json, "w") as f: json.dump(chunk_info, f, indent=2)
     return chunks
 
-def discover_receiver(key_hash, sender_tcp_port, discovery_timeout=60):
-    """Broadcast discovery packet and listen for reply."""
-    global receiver_ip, receiver_port
+def discover_receiver(stego, timeout=DISCOVERY_TIMEOUT):
+    """Broadcast probes and listen for a response."""
+    global discovery_complete
+    log_debug("Starting receiver discovery...")
+    print(f"[DISCOVERY] Broadcasting probes on {stego.broadcast_ip}:{DISCOVERY_PORT}...")
+    print(f"[DISCOVERY] Waiting up to {timeout}s for a response...")
 
-    log_debug(f"Starting UDP discovery: Broadcasting key hash {key_hash[:8]}...")
-    print(f"[DISCOVERY] Broadcasting request with key hash {key_hash[:8]}...")
-    print(f"[DISCOVERY] Listening for reply on UDP port {sender_tcp_port}...") # Listen on our TCP port
-
-    udp_socket = None
-    try:
-        # Create UDP socket
-        udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Allow reuse of address
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        # Enable broadcasting
-        udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-        # Bind to the sender's TCP port to listen for the unicast reply
-        # Binding to '' listens on all interfaces for the reply
-        udp_socket.bind(("", sender_tcp_port))
-        log_debug(f"UDP socket bound to ('', {sender_tcp_port}) for listening")
-
-        # Prepare broadcast payload
-        broadcast_payload = {
-            "type": "crypticroute_discover",
-            "key_hash": key_hash,
-            "sender_port": sender_tcp_port # Include our TCP port
-        }
-        broadcast_data = json.dumps(broadcast_payload).encode('utf-8')
-
-        # Broadcast periodically and listen for reply
-        start_time = time.time()
-        broadcast_interval = 2 # seconds
-        next_broadcast_time = time.time()
-
-        udp_socket.settimeout(1.0) # Set short timeout for recvfrom
-
-        while time.time() - start_time < discovery_timeout:
-            # Send broadcast if interval passed
-            if time.time() >= next_broadcast_time:
-                 log_debug(f"Broadcasting discovery packet to {BROADCAST_ADDR}:{DISCOVERY_PORT}")
-                 try:
-                     udp_socket.sendto(broadcast_data, (BROADCAST_ADDR, DISCOVERY_PORT))
-                 except OSError as e:
-                      # Handle potential network errors during broadcast
-                      log_debug(f"Warning: Error sending broadcast: {e}. Check network/permissions.")
-                      # Don't necessarily stop, maybe it works next time
-                 next_broadcast_time = time.time() + broadcast_interval
-
-            # Listen for reply
-            try:
-                data, addr = udp_socket.recvfrom(1024) # Buffer size
-                log_debug(f"Received UDP packet from {addr}: {data}")
-
-                # Attempt to decode JSON payload
-                try:
-                    payload = json.loads(data.decode('utf-8'))
-                    log_debug(f"Decoded JSON payload: {payload}")
-
-                    # Check if it's the correct reply type and matches hash
-                    if (payload.get("type") == "crypticroute_reply" and
-                            payload.get("key_hash") == key_hash and
-                            "receiver_port" in payload):
-
-                        r_ip = addr[0]
-                        r_port = payload["receiver_port"] # This is the receiver's TCP port
-
-                        log_debug(f"Receiver reply MATCH! IP={r_ip}, TCP Port={r_port}")
-                        print(f"\n[DISCOVERY] Receiver responded from IP: {r_ip}")
-                        print(f"[DISCOVERY] Receiver's TCP listening port: {r_port}")
-
-                        # Store discovered info
-                        receiver_ip = r_ip
-                        receiver_port = r_port # Receiver's TCP port
-                        return receiver_ip, receiver_port
-
-                    else:
-                        log_debug("UDP packet ignored: Invalid format, type, or non-matching hash.")
-
-                except json.JSONDecodeError:
-                    log_debug(f"UDP packet ignored: Not valid JSON.")
-                except UnicodeDecodeError:
-                    log_debug(f"UDP packet ignored: Cannot decode as UTF-8.")
-                except Exception as e:
-                     log_debug(f"Error processing received UDP packet: {e}")
+    stego.start_discovery_listener()
+    start_time = time.time()
+    probes_sent = 0
+    while not discovery_complete and time.time() - start_time < timeout:
+        stego.send_discovery_probe()
+        probes_sent += 1
+        # Wait a bit, checking frequently if discovery happened
+        wait_interval = 0.1
+        probe_interval = 1.0 # Send probe every second
+        check_count = int(probe_interval / wait_interval)
+        for _ in range(check_count):
+             if discovery_complete: break
+             time.sleep(wait_interval)
+        if discovery_complete: break
 
 
-            except socket.timeout:
-                # No reply received in this 1s interval, continue loop
-                pass # Just means no packet arrived in this short window
-            except Exception as e:
-                 log_debug(f"Error receiving UDP packet: {e}")
-                 # Continue trying unless it's a fatal error?
+    stego.stop_discovery_listener() # Ensure listener stops
 
-
-        # Loop finished without success
-        log_debug(f"UDP discovery timeout after {discovery_timeout} seconds.")
-        print(f"\n[DISCOVERY] No valid receiver reply received within {discovery_timeout} seconds.")
-        return None, None # Indicate timeout/failure
-
-    except OSError as e:
-         log_debug(f"UDP Socket Error: {e}. Check port {sender_tcp_port} availability, broadcast permissions.")
-         print(f"[ERROR] UDP Socket Error: {e}. Cannot perform discovery.")
-         return None, None
-    except Exception as e:
-        log_debug(f"Unexpected error during UDP discovery: {e}")
-        print(f"[ERROR] Unexpected error during UDP discovery: {e}")
-        return None, None
-    finally:
-        if udp_socket:
-            udp_socket.close()
-            log_debug("UDP discovery socket closed.")
-
-def establish_connection(stego):
-    """Establish connection with the receiver using three-way handshake."""
-    global connection_established
-
-    if not stego.target_ip or not stego.receiver_tcp_port:
-         log_debug("Cannot establish connection: Receiver IP/Port unknown.")
-         print("[ERROR] Cannot establish connection: Receiver info missing.")
-         return False
-
-    log_debug(f"Starting TCP connection establishment with {stego.target_ip}:{stego.receiver_tcp_port}")
-    print(f"[HANDSHAKE] Initiating TCP connection with receiver {stego.target_ip}:{stego.receiver_tcp_port}...")
-
-    # Start Scapy ACK listener thread (to catch SYN-ACK and data ACKs)
-    if not stego.start_ack_listener():
-         log_debug("Failed to start ACK listener. Aborting handshake.")
-         return False
-
-
-    # Send SYN packet
-    syn_packet = stego.create_syn_packet()
-    if not syn_packet:
-         log_debug("Failed to create SYN packet. Aborting.")
-         stego.stop_ack_listener()
-         return False
-
-    log_debug("Sending SYN packet...")
-    print("[HANDSHAKE] Sending SYN packet...")
-
-    # Send multiple times and wait for connection_established flag (set by ACK listener)
-    max_syn_attempts = 15
-    syn_interval = 0.5 # seconds
-    attempts = 0
-
-    while not connection_established and attempts < max_syn_attempts:
-        send(syn_packet)
-        attempts += 1
-        log_debug(f"Sent SYN (Attempt {attempts}/{max_syn_attempts})")
-
-        # Wait a bit, checking flag periodically
-        wait_start = time.time()
-        while not connection_established and time.time() - wait_start < syn_interval:
-             time.sleep(0.1) # Short sleep
-
-        if connection_established:
-             log_debug("Connection established flag detected during SYN send loop.")
-             break # Exit loop if connected
-
-        # If not connected after interval, loop will send SYN again
-
-    # Check final status
-    if connection_established:
-        log_debug("TCP Handshake successful (connection established flag is True)")
-        print("[HANDSHAKE] TCP Handshake successful!")
-        # ACK listener remains running for data phase
+    if discovery_complete:
+        log_debug(f"Discovery successful after {time.time() - start_time:.2f}s. Receiver: {receiver_ip}:{receiver_port}")
+        print(f"[DISCOVERY] Success! Found receiver at {receiver_ip}")
         return True
     else:
-        log_debug(f"TCP Handshake failed after {attempts} SYN attempts.")
-        print("[HANDSHAKE] Failed to establish TCP connection with receiver.")
+        log_debug(f"Discovery timed out after {timeout}s.")
+        print("[DISCOVERY] Failed. No valid response received.")
+        return False
+
+
+def establish_connection(stego):
+    """Establish connection with the discovered receiver."""
+    global connection_established, stop_sniffing
+    if not stego.target_ip:
+         log_debug("Cannot establish connection: Receiver not discovered.")
+         return False
+
+    log_debug("Starting connection establishment...")
+    print(f"[HANDSHAKE] Initiating connection with discovered receiver {stego.target_ip}...")
+
+    # Start ACK listener thread (now that we know the target IP)
+    stego.start_ack_listener()
+
+    syn_packet = stego.create_syn_packet()
+    if not syn_packet: return False
+
+    log_debug("Sending SYN packet")
+    print(f"[HANDSHAKE] Sending SYN packet to {stego.target_ip}:{receiver_port}...") # Target the port from SYN-ACK later
+
+    # Send SYN repeatedly, waiting for SYN-ACK (processed by ack_listener_thread)
+    max_wait = 20
+    start_time = time.time()
+    syn_sends = 0
+    while not connection_established and time.time() - start_time < max_wait:
+        if syn_sends < 10 or (time.time() - start_time) % 3 < 0.2: # Send frequently initially, then less often
+             log_debug(f"Sending SYN ({syn_sends+1})")
+             send(syn_packet)
+             syn_sends+=1
+        time.sleep(0.2) # Check status often
+
+    if connection_established:
+        log_debug("Connection established successfully")
+        # Handshake success message is printed in process_ack_packet
+        return True
+    else:
+        log_debug("Failed to establish connection (no SYN-ACK received)")
+        print("[HANDSHAKE] Failed to establish connection with receiver.")
         stego.stop_ack_listener() # Stop listener if handshake failed
         return False
 
+def send_file(file_path, interface, key_path=None, chunk_size=MAX_CHUNK_SIZE, delay=0.1):
+    """Discover, encrypt, and send a file via steganography."""
+    global connection_established, stop_sniffing, acked_chunks, receiver_ip, receiver_port, discovery_complete
 
-def send_file(file_path, key, chunk_size=MAX_CHUNK_SIZE, delay=0.1):
-    """Encrypt and send a file via steganography after discovering receiver."""
-    global connection_established, stop_sniffing, acked_chunks
-    global receiver_ip, receiver_port # Should be set by discovery
+    with open(DEBUG_LOG, "w") as f:
+        f.write(f"=== CrypticRoute Sender Session: {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
 
-    if not receiver_ip or not receiver_port:
-         log_debug("send_file called without discovered receiver IP/Port. Aborting.")
-         print("[ERROR] Receiver IP and Port not discovered. Cannot send file.")
-         return False
+    # Get broadcast address for the specified or default interface
+    broadcast_ip = get_broadcast_address(interface)
+    if not broadcast_ip:
+        print("Error: Could not determine broadcast IP. Exiting.")
+        sys.exit(1)
+    log_debug(f"Using broadcast address: {broadcast_ip}")
 
-    log_debug(f"Proceeding with transmission to receiver: {receiver_ip}:{receiver_port}")
-    print(f"[INFO] Starting TCP transmission phase to receiver: {receiver_ip}:{receiver_port}")
-
-    # Create a summary file with transmission parameters
     summary = {
-        "timestamp_start": time.time(),
-        "input_file_path": file_path,
-        # key_path removed, we have key bytes
-        "key_hash": calculate_key_hash(key), # Log hash
-        "chunk_size": chunk_size,
-        "inter_packet_delay": delay,
-        "discovered_receiver_ip": receiver_ip,
-        "discovered_receiver_port": receiver_port, # TCP port
-        "sender_tcp_port": stego.source_port, # Our TCP port
-        "ack_timeout": ACK_WAIT_TIMEOUT,
-        "max_retransmissions": MAX_RETRANSMISSIONS
+        "timestamp": time.time(), "file_path": file_path,
+        "broadcast_ip": broadcast_ip, "interface": interface,
+        "key_path": key_path, "chunk_size": chunk_size, "delay": delay
     }
     summary_path = os.path.join(LOGS_DIR, "session_summary.json")
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+    with open(summary_path, "w") as f: json.dump(summary, f, indent=2)
 
-    # Reset global variables for TCP phase
-    acked_chunks.clear()
+    acked_chunks = set()
     connection_established = False
-    stop_sniffing = False # Reset Scapy stop flag
+    stop_sniffing = False
+    receiver_ip = None
+    receiver_port = None
+    discovery_complete = False
 
-    # SteganographySender instance 'stego' should already exist from main()
+    # Prepare key first to get hashes for discovery
+    key = None
+    if key_path:
+        log_debug(f"Reading key from: {key_path}")
+        print(f"[KEY] Reading key: {key_path}")
+        key_data = read_file(key_path, 'rb')
+        key = prepare_key(key_data) # This now also derives identifiers
+    else:
+        print("Error: Key file is required for discovery.")
+        sys.exit(1)
 
-    # Establish TCP connection (uses info set in stego object)
-    if not establish_connection(stego):
-        log_debug("Aborting transmission due to TCP connection failure")
-        print("[ERROR] Aborting transmission due to TCP connection failure")
-        # ACK listener is stopped by establish_connection on failure
+    stego = SteganographySender(broadcast_ip)
+
+    # --- Discovery Phase ---
+    if not discover_receiver(stego):
+        log_debug("Aborting transmission due to discovery failure")
+        print("[ERROR] Aborting transmission - receiver not found.")
         return False
 
+    # --- Connection Establishment Phase ---
+    if not establish_connection(stego):
+        log_debug("Aborting transmission due to connection failure")
+        print("[ERROR] Aborting transmission - connection handshake failed.")
+        # No need to stop ack listener, establish_connection does it on failure
+        return False
 
-    # Read the input file
+    # --- Data Transmission Phase ---
     log_debug(f"Reading file: {file_path}")
     print(f"[FILE] Reading: {file_path}")
     file_data = read_file(file_path, 'rb')
-    log_debug(f"Read {len(file_data)} bytes.")
     print(f"[FILE] Read {len(file_data)} bytes successfully")
 
-    # Print the content for debugging
     try:
-        # Limit preview
-        preview_len = 500
-        text_content = file_data[:preview_len].decode('utf-8', errors='replace')
-        suffix = "..." if len(file_data) > preview_len else ""
-        log_debug(f"Original file content (preview): {text_content}{suffix}")
+        text_content = file_data.decode('utf-8')
+        log_debug(f"File content (as text): {text_content[:100]}...")
+        text_file = os.path.join(DATA_DIR, "original_content.txt")
+        with open(text_file, "w") as f: f.write(text_content)
+    except UnicodeDecodeError:
+        log_debug(f"File content (as hex): {file_data.hex()[:100]}...")
 
-        # Save the text content as a text file
-        text_file = os.path.join(DATA_DIR, "original_content_preview.txt")
-        with open(text_file, "w", encoding='utf-8', errors='replace') as f:
-            f.write(file_data.decode('utf-8', errors='replace'))
-        log_debug(f"Saved original content (UTF-8 decoded with replacements) to {text_file}")
-
-    except Exception as e: # Catch potential errors during decode/write
-        log_debug(f"Could not decode/save original content as text: {e}")
-        log_debug(f"File content head (hex): {file_data[:64].hex()}")
-
-    # Encrypt the data (key is already prepared)
+    # Encrypt data (key already prepared)
     log_debug("Encrypting data...")
     print(f"[ENCRYPT] Starting encryption of {len(file_data)} bytes...")
-    encrypted_payload = encrypt_data(file_data, key)
-    log_debug(f"Data encrypted. Size including IV: {len(encrypted_payload)} bytes")
-    print(f"[ENCRYPT] Completed encryption. Result size (incl. IV): {len(encrypted_payload)} bytes")
+    file_data = encrypt_data(file_data, key)
+    log_debug(f"Data encrypted, size: {len(file_data)} bytes")
+    print(f"[ENCRYPT] Completed encryption. Result size: {len(file_data)} bytes")
 
+    file_checksum = hashlib.md5(file_data).digest()
+    log_debug(f"Generated MD5 checksum: {file_checksum.hex()}")
+    print(f"[CHECKSUM] Generated MD5: {file_checksum.hex()}")
+    file_data_with_checksum = file_data + file_checksum
 
-    # Add MD5 checksum for integrity verification
-    file_checksum = hashlib.md5(encrypted_payload).digest() # Checksum of IV + encrypted data
-    log_debug(f"Generated MD5 checksum for (IV+encrypted_data): {file_checksum.hex()}")
-    print(f"[CHECKSUM] Generated MD5 for final payload: {file_checksum.hex()}")
-    final_data_package = encrypted_payload + file_checksum
-    log_debug(f"Final package size (IV+data+checksum): {len(final_data_package)}")
-
-
-    # Save components for debugging
     checksum_file = os.path.join(DATA_DIR, "md5_checksum.bin")
-    with open(checksum_file, "wb") as f:
-        f.write(file_checksum)
+    with open(checksum_file, "wb") as f: f.write(file_checksum)
+    final_package_file = os.path.join(DATA_DIR, "final_data_package.bin")
+    with open(final_package_file, "wb") as f: f.write(file_data_with_checksum)
 
-    final_package_file = os.path.join(DATA_DIR, "final_data_package_sent.bin")
-    with open(final_package_file, "wb") as f:
-        f.write(final_data_package)
-
-
-    # Chunk the final data package
-    print(f"[PREP] Splitting final data package into chunks of size {chunk_size} bytes...")
-    chunks = chunk_data(final_data_package, chunk_size)
+    print(f"[PREP] Splitting data into chunks of size {chunk_size} bytes...")
+    chunks = chunk_data(file_data_with_checksum, chunk_size)
     total_chunks = len(chunks)
-    log_debug(f"Data split into {total_chunks} chunks")
+    log_debug(f"File split into {total_chunks} chunks")
     print(f"[PREP] Data split into {total_chunks} chunks")
 
-    # Send all chunks in order with acknowledgment
-    log_debug(f"Sending {total_chunks} chunks to {receiver_ip}:{receiver_port}...")
-    print(f"[TRANSMISSION] Starting data transmission to {receiver_ip}:{receiver_port}...")
+    # --- Send Chunks ---
+    log_debug(f"Sending data to discovered receiver {stego.target_ip}...")
+    print(f"[TRANSMISSION] Starting data transmission to {stego.target_ip}...")
+    print(f"[INFO] Total chunks to send: {total_chunks}")
 
-    transmission_success_all_acked = True # Track if all chunks get ACKed
-    start_time = time.time()
-
+    transmission_success = True
     for i, chunk in enumerate(chunks):
-        seq_num = i + 1  # Sequence numbers start from 1
-
-        # Send the chunk using the acknowledgment system
-        # log_debug(f"Preparing chunk {seq_num}/{total_chunks}") # Redundant with send_chunk logs
-        success_this_chunk = stego.send_chunk(chunk, seq_num, total_chunks)
-
-        if not success_this_chunk:
-             transmission_success_all_acked = False
-             log_debug(f"Failed to get ACK for chunk {seq_num}")
-             # Continue sending subsequent chunks anyway? Yes, current logic does.
-
-        # Add delay between packets
+        seq_num = i + 1
+        # Simple sending order for now, priority chunks concept removed for clarity
+        print(f"[PROGRESS] Preparing chunk {seq_num:04d}/{total_chunks:04d}")
+        success = stego.send_chunk(chunk, seq_num, total_chunks)
+        progress = (seq_num / total_chunks) * 100
+        if success:
+            print(f"[STATUS] Completed chunk {seq_num:04d}/{total_chunks:04d} | Progress: {progress:.2f}%")
+        else:
+            print(f"[WARNING] Chunk {seq_num:04d} may not have been received | Progress: {progress:.2f}%")
+            transmission_success = False
         time.sleep(delay)
 
-    duration = time.time() - start_time
-    log_debug(f"Finished sending all {total_chunks} chunks in {duration:.2f} seconds.")
-    print(f"[TRANSMISSION] Finished sending all chunks.")
-
-
-    # Send completion signal (FIN packet)
+    # --- Completion ---
     completion_packet = stego.create_completion_packet()
-    if completion_packet:
-        print("[COMPLETE] Sending transmission completion signals...")
-        # Send multiple times to increase chance of receipt
-        for i in range(5):
-            log_debug(f"Sending completion signal (Attempt {i+1}/5)")
-            # print(f"[COMPLETE] Sending signal {i+1}/5") # Reduce noise
-            send(completion_packet)
-            time.sleep(0.1)
-        log_debug("Finished sending completion signals.")
-    else:
-         log_debug("Could not create completion packet.")
-         print("[WARNING] Could not send completion signal.")
+    print("[COMPLETE] Sending transmission completion signals...")
+    for i in range(10):
+        log_debug("Sending completion signal")
+        print(f"[COMPLETE] Sending signal {i+1}/10")
+        send(completion_packet)
+        time.sleep(0.2)
 
-    # Stop the ACK listener thread
+    stop_sniffing = True # Signal ACK listener thread to stop
     stego.stop_ack_listener()
 
-    # Calculate and log final statistics
-    ack_count = len(acked_chunks)
-    ack_rate = (ack_count / total_chunks * 100) if total_chunks > 0 else 100
-    missing_acks = total_chunks - ack_count
+    ack_rate = (len(acked_chunks) / total_chunks) * 100 if total_chunks > 0 else 0
+    log_debug(f"Transmission complete! ACK rate: {ack_rate:.2f}% ({len(acked_chunks)}/{total_chunks})")
+    print(f"[STATS] ACK rate: {ack_rate:.2f}% ({len(acked_chunks)}/{total_chunks} chunks acknowledged)")
 
-    log_debug(f"Transmission complete! ACK rate: {ack_rate:.2f}% ({ack_count}/{total_chunks})")
-    log_debug(f"Missing ACKs for {missing_acks} chunks.")
-    print(f"\n[STATS] Transmission Summary:")
-    print(f"- Total Chunks Sent: {total_chunks}")
-    print(f"- Chunks Acknowledged: {ack_count}")
-    print(f"- ACK Rate: {ack_rate:.2f}%")
-    print(f"- Missing ACKs: {missing_acks}")
+    status_msg = "successfully" if transmission_success else "with some unacknowledged chunks"
+    log_debug(f"Transmission completed {status_msg}")
+    print(f"[COMPLETE] Transmission completed {status_msg}!")
 
-    final_status = "completed"
-    if missing_acks > 0:
-        final_status = "partial_unacked_chunks"
-        print("[WARNING] Some chunks were not acknowledged by the receiver.")
-    else:
-        print("[COMPLETE] All chunks appear to have been acknowledged.")
-
-
-    # Save session completion info
     completion_info = {
-        "completed_at": time.time(),
-        "total_chunks_sent": total_chunks,
-        "chunks_acknowledged": ack_count,
-        "ack_rate_percent": ack_rate,
-        "missing_acks_count": missing_acks,
-        "duration_seconds": duration,
-        "status": final_status
+        "completed_at": time.time(), "total_chunks_sent": total_chunks,
+        "chunks_acknowledged": len(acked_chunks), "ack_rate": ack_rate,
+        "status": "completed" if transmission_success else "partial",
+        "receiver_ip": receiver_ip, "receiver_port": receiver_port
     }
     completion_path = os.path.join(LOGS_DIR, "completion_info.json")
-    with open(completion_path, "w") as f:
-        json.dump(completion_info, f, indent=2)
+    with open(completion_path, "w") as f: json.dump(completion_info, f, indent=2)
 
     print(f"[INFO] All session data saved to: {SESSION_DIR}")
-    print(f"[INFO] Final status: {final_status}")
-
-    return missing_acks == 0 # Return True only if all chunks were ACKed
-
+    return True
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='CrypticRoute - Simplified Network Steganography Sender')
-    # Target removed, will use discovery
-    # parser.add_argument('--target', '-t', required=True, help='Target IP address')
+    parser = argparse.ArgumentParser(description='CrypticRoute - Sender with Key-Based Discovery')
+    # Removed target IP, added interface
+    parser.add_argument('--interface', '-I', help='Network interface to broadcast discovery probes on (e.g., eth0, wlan0)')
     parser.add_argument('--input', '-i', required=True, help='Input file to send')
-    parser.add_argument('--key', '-k', required=True, help='Encryption key file (must match receiver)') # Made required
+    parser.add_argument('--key', '-k', required=True, help='Encryption key file (REQUIRED for discovery)')
     parser.add_argument('--delay', '-d', type=float, default=0.1, help='Delay between packets in seconds (default: 0.1)')
     parser.add_argument('--chunk-size', '-c', type=int, default=MAX_CHUNK_SIZE,
-                        help=f'Chunk size in bytes (must be {MAX_CHUNK_SIZE})') # Fixed chunk size
-    parser.add_argument('--output-dir', '-o', help='Custom base directory for session outputs')
+                        help=f'Chunk size in bytes (default: {MAX_CHUNK_SIZE})')
+    parser.add_argument('--output-dir', '-o', help='Custom output directory')
     parser.add_argument('--ack-timeout', '-a', type=int, default=ACK_WAIT_TIMEOUT,
                         help=f'Timeout for waiting for ACK in seconds (default: {ACK_WAIT_TIMEOUT})')
     parser.add_argument('--max-retries', '-r', type=int, default=MAX_RETRANSMISSIONS,
                         help=f'Maximum retransmission attempts per chunk (default: {MAX_RETRANSMISSIONS})')
-    parser.add_argument('--discovery-timeout', type=int, default=60, help='Timeout for UDP discovery in seconds (default: 60)')
+    parser.add_argument('--discovery-timeout', '-dt', type=int, default=DISCOVERY_TIMEOUT,
+                        help=f'Timeout for receiver discovery in seconds (default: {DISCOVERY_TIMEOUT})')
     return parser.parse_args()
-
-# Define stego globally so it can be accessed in main scope after initialization
-stego = None
 
 def main():
     """Main function."""
-    global OUTPUT_DIR, ACK_WAIT_TIMEOUT, MAX_RETRANSMISSIONS, MAX_CHUNK_SIZE, stego
-
-    # Parse arguments
     args = parse_arguments()
 
-    # Setup output directory structure
-    if args.output_dir:
-        OUTPUT_DIR = args.output_dir
-    setup_directories() # Call early for logging
+    global OUTPUT_DIR, ACK_WAIT_TIMEOUT, MAX_RETRANSMISSIONS, DISCOVERY_TIMEOUT
+    if args.output_dir: OUTPUT_DIR = args.output_dir
+    setup_directories()
 
-    # Log arguments
-    log_debug("Sender started with arguments:")
-    for arg, value in vars(args).items():
-         # Don't log key content, maybe just path or existence
-         if arg == 'key':
-             log_debug(f"  --{arg}: {value} (present)")
-         else:
-             log_debug(f"  --{arg}: {value}")
-
-    # Validate chunk size (must be MAX_CHUNK_SIZE for this implementation)
-    if args.chunk_size != MAX_CHUNK_SIZE:
-        log_debug(f"Error: Invalid chunk size specified ({args.chunk_size}). Must be {MAX_CHUNK_SIZE}.")
-        print(f"Error: Chunk size must be {MAX_CHUNK_SIZE} for this implementation.")
-        sys.exit(1)
-    chunk_size = MAX_CHUNK_SIZE # Use the fixed size
-
-
-    # Set ACK timeout and max retries from args
     ACK_WAIT_TIMEOUT = args.ack_timeout
     MAX_RETRANSMISSIONS = args.max_retries
-    log_debug(f"ACK Timeout set to: {ACK_WAIT_TIMEOUT}s")
-    log_debug(f"Max Retransmissions set to: {MAX_RETRANSMISSIONS}")
+    DISCOVERY_TIMEOUT = args.discovery_timeout # Use argument
 
+    chunk_size = min(args.chunk_size, MAX_CHUNK_SIZE)
+    if args.chunk_size > MAX_CHUNK_SIZE:
+        print(f"Warning: Chunk size reduced to {MAX_CHUNK_SIZE}")
 
-    # Prepare encryption key and calculate hash
-    key = None
-    key_hash = None
-    log_debug(f"Reading key file from: {args.key}")
-    print(f"Reading key from: {args.key}")
-    try:
-        with open(args.key, 'rb') as key_file:
-            key_data = key_file.read()
-        key = prepare_key(key_data) # Prepare key (e.g., ensure 32 bytes)
-        key_hash = calculate_key_hash(key) # Calculate hash AFTER preparation
-        log_debug(f"Calculated key hash ({KEY_HASH_ALGO}): {key_hash}")
-        print(f"Key loaded successfully. Hash ({KEY_HASH_ALGO}): {key_hash[:8]}...")
-    except Exception as e:
-        log_debug(f"Fatal Error reading or preparing key file: {e}")
-        print(f"Fatal Error reading or preparing key file: {e}")
-        sys.exit(1)
-
-
-    # Choose a random TCP source port for this session
-    sender_tcp_port = random.randint(10000, 60000)
-    log_debug(f"Chosen sender TCP source port for this session: {sender_tcp_port}")
-
-    # Create SteganographySender instance (needs TCP port)
-    stego = SteganographySender(sender_tcp_port)
-
-
-    # --- UDP Discovery Phase ---
-    discovered_ip, discovered_tcp_port = discover_receiver(key_hash, sender_tcp_port, args.discovery_timeout)
-
-    if not discovered_ip:
-        log_debug("Receiver discovery failed. Exiting.")
-        print("[FAIL] Could not discover receiver. Exiting.")
-        sys.exit(1)
-    else:
-        log_debug(f"Discovery successful. Receiver: {discovered_ip}:{discovered_tcp_port}")
-        print(f"[SUCCESS] Receiver located at {discovered_ip}, listening on TCP port {discovered_tcp_port}")
-        # Set receiver info in the stego object
-        stego.set_receiver_info(discovered_ip, discovered_tcp_port)
-        # Globals receiver_ip and receiver_port are also set
-
-
-    # --- TCP Transmission Phase ---
     success = send_file(
         args.input,
-        key, # Pass prepared key bytes
-        chunk_size, # Pass validated chunk size
+        args.interface, # Pass interface instead of target IP
+        args.key,
+        chunk_size,
         args.delay
     )
 
-    # Exit with appropriate status
-    log_debug(f"Sender finished. Success status (all ACKs received): {success}")
-    print(f"\nSender finished. {'All chunks acknowledged.' if success else 'Operation completed, but some chunks may not have been acknowledged.'}")
-    sys.exit(0 if success else 1) # Exit 0 only if all chunks ACKed
-
+    sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
     main()
