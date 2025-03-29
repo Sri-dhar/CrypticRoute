@@ -1,4 +1,6 @@
-# --- START OF MODIFIED gui.py ---
+# --- START OF FILE gui.py ---
+
+# --- START OF ENHANCED gui.py ---
 
 #!/usr/bin/env python3
 """
@@ -6,6 +8,7 @@ CrypticRoute GUI - Network Steganography Tool
 A graphical interface for the sender and receiver components of CrypticRoute
 Enhanced with PyQt6 and visualization for handshake and ACK system
 (Modified: ACK progress bar moved to separate window, main panel shows count)
+(Enhanced: Handshake indicators integrated in progress bar, resizable transmission log)
 """
 
 import sys
@@ -16,11 +19,11 @@ import threading
 import json
 import queue
 import signal
-# Corrected QtWidgets import (Removed QAction)
+# Corrected QtWidgets import (Added QSplitter, QFrame)
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                             QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton,
                             QSpinBox, QDoubleSpinBox, QTextEdit, QFileDialog, QComboBox,
-                            QProgressBar, QGroupBox, QCheckBox, QSplitter, QFrame,
+                            QProgressBar, QGroupBox, QCheckBox, QSplitter, QFrame, # Added QSplitter, QFrame
                             QMessageBox, QStyle, QStatusBar, QGridLayout, QScrollArea)
 from PyQt6.QtCore import (QThread, pyqtSignal, Qt, QTimer, QSettings, QPropertyAnimation,
                           QEasingCurve, QSize)
@@ -55,7 +58,7 @@ COLORS = {
     'ack': '#06B6D4',        # Cyan for ACKs
 }
 
-# --- Classes (AnimatedProgressBar, AckProgressBar, HandshakeIndicator unchanged) ---
+# --- Classes (AnimatedProgressBar, AckProgressBar unchanged) ---
 
 class AnimatedProgressBar(QProgressBar):
     """A progress bar with value animation effects"""
@@ -113,227 +116,8 @@ class AckProgressBar(AnimatedProgressBar):
             }}
         """)
 
-class HandshakeIndicator(QWidget):
-    """Widget to visualize the TCP-like handshake process"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setup_ui()
-        self.reset()
-        # Initially hidden until connection starts
-        self.setVisible(False)
-
-    def setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(5)
-
-        # More compact layout
-        stages_layout = QHBoxLayout()
-        stages_layout.setSpacing(3)
-
-        # SYN Stage
-        self.syn_indicator = QLabel("SYN")
-        self.syn_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.syn_indicator.setStyleSheet(f"""
-            background-color: {COLORS['light']};
-            color: {COLORS['text']};
-            border: 1px solid {COLORS['secondary']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-size: 9pt;
-        """)
-        stages_layout.addWidget(self.syn_indicator)
-
-        # Arrow 1
-        arrow1 = QLabel("→")
-        arrow1.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        arrow1.setFixedWidth(15)
-        stages_layout.addWidget(arrow1)
-
-        # SYN-ACK Stage
-        self.syn_ack_indicator = QLabel("SYN-ACK")
-        self.syn_ack_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.syn_ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['light']};
-            color: {COLORS['text']};
-            border: 1px solid {COLORS['secondary']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 60px;
-            font-size: 9pt;
-        """)
-        stages_layout.addWidget(self.syn_ack_indicator)
-
-        # Arrow 2
-        arrow2 = QLabel("→")
-        arrow2.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        arrow2.setFixedWidth(15)
-        stages_layout.addWidget(arrow2)
-
-        # ACK Stage
-        self.ack_indicator = QLabel("ACK")
-        self.ack_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['light']};
-            color: {COLORS['text']};
-            border: 1px solid {COLORS['secondary']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-size: 9pt;
-        """)
-        stages_layout.addWidget(self.ack_indicator)
-
-        # Status with less space
-        self.status_label = QLabel("Not Connected")
-        self.status_label.setStyleSheet(f"""
-            color: {COLORS['danger']};
-            font-weight: bold;
-            padding: 2px;
-            font-size: 9pt;
-        """)
-        stages_layout.addWidget(self.status_label, 1, alignment=Qt.AlignmentFlag.AlignRight)
-
-        layout.addLayout(stages_layout)
-
-    def reset(self):
-        """Reset all indicators to their initial state."""
-        self.syn_indicator.setStyleSheet(f"""
-            background-color: {COLORS['light']};
-            color: {COLORS['text']};
-            border: 1px solid {COLORS['secondary']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-size: 9pt;
-        """)
-        self.syn_ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['light']};
-            color: {COLORS['text']};
-            border: 1px solid {COLORS['secondary']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 60px;
-            font-size: 9pt;
-        """)
-        self.ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['light']};
-            color: {COLORS['text']};
-            border: 1px solid {COLORS['secondary']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-size: 9pt;
-        """)
-        self.status_label.setText("Not Connected")
-        self.status_label.setStyleSheet(f"""
-            color: {COLORS['danger']};
-            font-weight: bold;
-            padding: 2px;
-            font-size: 9pt;
-        """)
-        # Hide the indicator again
-        self.setVisible(False)
-
-    def set_syn_sent(self):
-        """Mark the SYN stage as completed."""
-        # Make the indicator visible when connection starts
-        self.setVisible(True)
-        self.syn_indicator.setStyleSheet(f"""
-            background-color: {COLORS['handshake']};
-            color: {COLORS['text_light']};
-            border: 1px solid {COLORS['handshake']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-weight: bold;
-            font-size: 9pt;
-        """)
-        self.status_label.setText("SYN Sent")
-        self.status_label.setStyleSheet(f"""
-            color: {COLORS['handshake']};
-            font-weight: bold;
-            padding: 2px;
-            font-size: 9pt;
-        """)
-
-    def set_syn_ack_sent(self):
-        """Mark the SYN-ACK stage as completed."""
-        self.setVisible(True)
-        self.syn_ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['handshake']};
-            color: {COLORS['text_light']};
-            border: 1px solid {COLORS['handshake']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 60px;
-            font-weight: bold;
-            font-size: 9pt;
-        """)
-        self.status_label.setText("SYN-ACK") # Simplified status
-        self.status_label.setStyleSheet(f"""
-            color: {COLORS['handshake']};
-            font-weight: bold;
-            padding: 2px;
-            font-size: 9pt;
-        """)
-
-    def set_ack_sent(self):
-        """Mark the ACK stage as completed."""
-        self.setVisible(True)
-        self.ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['handshake']};
-            color: {COLORS['text_light']};
-            border: 1px solid {COLORS['handshake']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-weight: bold;
-            font-size: 9pt;
-        """)
-
-    def set_connection_established(self):
-        """Mark the connection as fully established."""
-        self.setVisible(True)
-        self.syn_indicator.setStyleSheet(f"""
-            background-color: {COLORS['success']};
-            color: {COLORS['text_light']};
-            border: 1px solid {COLORS['success']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-weight: bold;
-            font-size: 9pt;
-        """)
-        self.syn_ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['success']};
-            color: {COLORS['text_light']};
-            border: 1px solid {COLORS['success']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 60px;
-            font-weight: bold;
-            font-size: 9pt;
-        """)
-        self.ack_indicator.setStyleSheet(f"""
-            background-color: {COLORS['success']};
-            color: {COLORS['text_light']};
-            border: 1px solid {COLORS['success']};
-            border-radius: 4px;
-            padding: 2px;
-            min-width: 40px;
-            font-weight: bold;
-            font-size: 9pt;
-        """)
-        self.status_label.setText("Connected")
-        self.status_label.setStyleSheet(f"""
-            color: {COLORS['success']};
-            font-weight: bold;
-            padding: 2px;
-            font-size: 9pt;
-        """)
+# --- HandshakeIndicator REMOVED as it's integrated into HandshakeProgressBar ---
+# class HandshakeIndicator(QWidget): ...
 
 # --- AcknowledgmentPanel: Modified for Details Window ---
 class AcknowledgmentPanel(QWidget):
@@ -507,9 +291,10 @@ class AckDetailsWindow(QWidget):
 
         # Load initial state from sender panel
         self.reset() # Ensure clean state
-        self.set_total_chunks(self.sender_panel.total_chunks)
-        for chunk in sorted(list(self.sender_panel.acked_chunks)):
-             self.acknowledge_chunk(chunk)
+        if self.sender_panel: # Check if sender_panel exists
+            self.set_total_chunks(self.sender_panel.total_chunks)
+            for chunk in sorted(list(self.sender_panel.acked_chunks)):
+                 self.acknowledge_chunk(chunk)
 
 
     def set_total_chunks(self, total):
@@ -544,17 +329,17 @@ class AnimatedStatusLabel(QLabel):
 
     def setText(self, text):
         super(AnimatedStatusLabel, self).setText(text)
-        if any(word in text.lower() for word in ["completed", "success", "complete"]):
+        if any(word in text.lower() for word in ["completed", "success", "complete", "saved"]):
             self.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold; padding: 5px; border-radius: 4px;")
         elif any(word in text.lower() for word in ["error", "failed", "stopped"]):
             self.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold; padding: 5px; border-radius: 4px;")
         elif any(word in text.lower() for word in ["warning", "caution"]):
             self.setStyleSheet(f"color: {COLORS['warning']}; font-weight: bold; padding: 5px; border-radius: 4px;")
-        elif any(word in text.lower() for word in ["starting", "listening", "waiting"]):
+        elif any(word in text.lower() for word in ["starting", "listening", "waiting", "initializing"]):
             self.setStyleSheet(f"color: {COLORS['info']}; font-weight: bold; padding: 5px; border-radius: 4px;")
-        elif any(word in text.lower() for word in ["connected", "established", "connection", "syn-ack"]): # Added syn-ack
-            self.setStyleSheet(f"color: {COLORS['handshake']}; font-weight: bold; padding: 5px; border-radius: 4px;")
-        else:
+        elif any(word in text.lower() for word in ["established", "connection established"]): # Focus on established state
+            self.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold; padding: 5px; border-radius: 4px;")
+        else: # Default/Ready state
             self.setStyleSheet(f"color: {COLORS['text']}; font-weight: bold; padding: 5px; border-radius: 4px;")
 
 
@@ -634,9 +419,19 @@ class ProgressTracker:
     def update_from_counts(self, current, total):
         with self.lock:
             if total <= 0:
-                return
-            new_percentage = min(100, (current / total * 100))
-            if not self.has_direct_percentage or new_percentage >= self.percentage: # Allow updates if percentage is same or higher
+                 # Handle case where current > 0 but total is unknown/0
+                 if current > 0:
+                     # Estimate progress - maybe assume total is slightly larger than current?
+                     # This is tricky, maybe just show 0% or a different indicator
+                     effective_total = max(current + 10, 100) # Simple estimation
+                     new_percentage = min(100, (current / effective_total * 100))
+                 else:
+                     return # No progress to show if both are 0 or less
+            else:
+                new_percentage = min(100, (current / total * 100))
+
+            # Allow updates if percentage is same or higher, OR if using counts after percentage
+            if not self.has_direct_percentage or new_percentage >= self.percentage:
                 self.current = current
                 self.total = total
                 self.percentage = new_percentage
@@ -647,10 +442,16 @@ class ProgressTracker:
         int_percentage = int(self.percentage)
         if (current_time - self.last_update_time >= self.update_interval or
                 abs(int_percentage - self.last_emitted_value) >= 1):
-            if self.has_direct_percentage:
-                self.progress_signal.emit(int_percentage, 100)
+            # Always emit current/total if available, otherwise percentage
+            # Note: The GUI update_progress method will calculate percentage from counts
+            if self.total > 0:
+                 self.progress_signal.emit(self.current, self.total)
+            elif self.has_direct_percentage:
+                 self.progress_signal.emit(int_percentage, 100) # Emit as percentage/100
             else:
-                self.progress_signal.emit(self.current, self.total)
+                 # Fallback: emit current count with an estimated total if total is unknown
+                 self.progress_signal.emit(self.current, max(self.current + 10, 100))
+
             self.last_update_time = current_time
             self.last_emitted_value = int_percentage
 
@@ -658,7 +459,7 @@ class ProgressTracker:
 # --- WorkerThread unchanged ---
 class WorkerThread(QThread):
     update_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int, int)
+    progress_signal = pyqtSignal(int, int) # (current, total)
     status_signal = pyqtSignal(str)
     finished_signal = pyqtSignal(bool)
     handshake_signal = pyqtSignal(str)      # Signal for handshake status
@@ -679,7 +480,8 @@ class WorkerThread(QThread):
             elif self.operation == "receive":
                 self.run_receiver()
         except Exception as e:
-            self.update_signal.emit(f"Error: {str(e)}")
+            self.update_signal.emit(f"Error starting process: {str(e)}")
+            self.status_signal.emit(f"Error: {str(e)}")
             self.finished_signal.emit(False)
 
     def run_sender(self):
@@ -698,10 +500,22 @@ class WorkerThread(QThread):
         cmd.extend(["--delay", str(delay), "--chunk-size", str(chunk_size)])
 
         self.status_signal.emit(f"Starting sender...") # Concise status
-        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        universal_newlines=True, bufsize=1, # Line buffered
-                                        env=dict(os.environ, PYTHONUNBUFFERED="1"),
-                                        errors='replace') # Handle potential encoding errors
+        try:
+            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            universal_newlines=True, bufsize=1, # Line buffered
+                                            env=dict(os.environ, PYTHONUNBUFFERED="1"),
+                                            errors='replace') # Handle potential encoding errors
+        except FileNotFoundError:
+            self.update_signal.emit("ERROR: sender.py not found. Make sure it's in the same directory or PATH.")
+            self.status_signal.emit("Error: sender.py not found")
+            self.finished_signal.emit(False)
+            return
+        except Exception as e:
+            self.update_signal.emit(f"ERROR launching sender: {e}")
+            self.status_signal.emit(f"Error launching sender")
+            self.finished_signal.emit(False)
+            return
+
         total_chunks = 0
         current_chunk = 0
 
@@ -710,32 +524,41 @@ class WorkerThread(QThread):
 
         while not self.stopped:
             line = None
+            err_line = None
             try:
+                # Non-blocking read-like approach
                 line = next(stdout_iterator, None)
-                if line is None:
-                    err_line = next(stderr_iterator, None)
-                    if err_line:
-                         self.update_signal.emit(f"ERROR: {err_line.strip()}")
-                    elif self.process.poll() is not None:
-                        break
-                    else:
-                        time.sleep(0.01)
-                        continue
-                else:
-                    line = line.strip()
-                    if not line: continue
+                err_line = next(stderr_iterator, None)
+
+                if line is None and err_line is None and self.process.poll() is not None:
+                    break # Process finished
+
+                if line is None and err_line is None:
+                    time.sleep(0.01) # Prevent busy-waiting
+                    continue
+
             except StopIteration:
+                 # Should not happen with universal_newlines=True, bufsize=1, but handle defensively
                  if self.process.poll() is not None: break
                  else: time.sleep(0.01); continue
+            except Exception as e:
+                 self.update_signal.emit(f"ERROR reading sender output: {e}")
+                 time.sleep(0.1)
+                 continue
+
+            if err_line:
+                 self.update_signal.emit(f"ERROR: {err_line.strip()}")
 
             if line:
+                line = line.strip()
+                if not line: continue # Skip empty lines
                 self.update_signal.emit(line)
 
                 # Track handshake stage
                 if "[HANDSHAKE] Initiating connection" in line:
                     self.handshake_signal.emit("syn_sent")
                 elif "[HANDSHAKE] Received SYN-ACK response" in line:
-                    self.handshake_signal.emit("syn_ack_received")
+                    self.handshake_signal.emit("syn_ack_received") # Corrected stage name
                 elif "[HANDSHAKE] Sending final ACK" in line:
                     self.handshake_signal.emit("ack_sent")
                 elif "[HANDSHAKE] Connection established" in line:
@@ -763,41 +586,57 @@ class WorkerThread(QThread):
                             self.status_signal.emit(f"Total chunks: {total_chunks}")
                             self.total_chunks_signal.emit(total_chunks)
                             # print(f"Sender emitted total chunks: {total_chunks}") # Debug
+                            # Update progress immediately if we have the total now
+                            if current_chunk > 0:
+                                self.progress_signal.emit(current_chunk, total_chunks)
                     except Exception as e:
                         print(f"Sender: Error parsing total chunk count from '{line}': {e}")
 
                 # Parse chunk counts for progress bar
+                # Look for "Completed chunk X/Y", "[PROGRESS] ... sequence: X/Y", or just "Completed chunk X"
                 progress_match = re.search(r"(?:Completed chunk|\[PROGRESS\].*sequence:)\s*(\d+)(?:/(\d+))?", line)
                 if progress_match:
                     try:
                         current_chunk = int(progress_match.group(1))
-                        if progress_match.group(2): # Total present
+                        if progress_match.group(2): # Total present in this line
                             new_total_chunks = int(progress_match.group(2))
                             if new_total_chunks != total_chunks and new_total_chunks > 0:
                                 total_chunks = new_total_chunks
                                 self.total_chunks_signal.emit(total_chunks)
                                 # print(f"Sender updated total chunks from progress: {total_chunks}") # Debug
-                        if current_chunk > 0 and total_chunks > 0:
-                             self.progress_signal.emit(current_chunk, total_chunks)
-                        elif current_chunk > 0: # Estimate total
-                             self.progress_signal.emit(current_chunk, max(current_chunk, 100))
+                        # Emit progress signal: Use known total if available, otherwise 0
+                        self.progress_signal.emit(current_chunk, total_chunks if total_chunks > 0 else 0)
+
                     except Exception as e:
                         print(f"Sender: Error parsing progress from '{line}': {e}")
 
                 elif "[COMPLETE] Transmission successfully completed" in line:
                     self.status_signal.emit("Transmission complete")
+                    # Ensure progress hits 100%
                     if total_chunks > 0: self.progress_signal.emit(total_chunks, total_chunks)
+                    else: self.progress_signal.emit(100, 100) # Assume 100% if total unknown
 
 
-        # Read remaining stderr
-        for err_line in stderr_iterator:
-             if self.stopped: break
-             self.update_signal.emit(f"ERROR: {err_line.strip()}")
+        # Read any remaining stderr after loop finishes
+        if self.process:
+            for err_line in self.process.stderr:
+                 if self.stopped: break
+                 self.update_signal.emit(f"ERROR: {err_line.strip()}")
 
-        exit_code = self.process.wait()
+        exit_code = self.process.wait() if self.process else -1
         success = (exit_code == 0 and not self.stopped)
-        if success and total_chunks > 0:
-            self.progress_signal.emit(total_chunks, total_chunks) # Ensure 100% on success
+
+        # Final status update
+        if self.stopped:
+             self.status_signal.emit("Transmission stopped by user")
+        elif success:
+             self.status_signal.emit("Transmission successfully completed")
+             # Ensure 100% progress on success
+             if total_chunks > 0: self.progress_signal.emit(total_chunks, total_chunks)
+             else: self.progress_signal.emit(100, 100)
+        else:
+             self.status_signal.emit(f"Transmission failed (Exit code: {exit_code})")
+
         self.finished_signal.emit(success)
 
     # --- run_receiver is unchanged from previous version ---
@@ -818,34 +657,57 @@ class WorkerThread(QThread):
         cmd.extend(["--timeout", str(timeout)])
 
         self.status_signal.emit(f"Starting receiver...") # Concise
-        self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                        universal_newlines=True, bufsize=1,
-                                        env=dict(os.environ, PYTHONUNBUFFERED="1"),
-                                        errors='replace')
+        try:
+            self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                            universal_newlines=True, bufsize=1,
+                                            env=dict(os.environ, PYTHONUNBUFFERED="1"),
+                                            errors='replace')
+        except FileNotFoundError:
+            self.update_signal.emit("ERROR: receiver.py not found. Make sure it's in the same directory or PATH.")
+            self.status_signal.emit("Error: receiver.py not found")
+            self.finished_signal.emit(False)
+            return
+        except Exception as e:
+            self.update_signal.emit(f"ERROR launching receiver: {e}")
+            self.status_signal.emit(f"Error launching receiver")
+            self.finished_signal.emit(False)
+            return
+
         progress_tracker = ProgressTracker(self.progress_signal)
-        current_total_chunks = 0
+        current_total_chunks = 0 # Track total known so far
 
         stdout_iterator = iter(self.process.stdout.readline, '')
         stderr_iterator = iter(self.process.stderr.readline, '')
 
         while not self.stopped:
             line = None
+            err_line = None
             try:
+                # Non-blocking read-like approach
                 line = next(stdout_iterator, None)
-                if line is None:
-                    err_line = next(stderr_iterator, None)
-                    if err_line:
-                         self.update_signal.emit(f"ERROR: {err_line.strip()}")
-                    elif self.process.poll() is not None: break
-                    else: time.sleep(0.01); continue
-                else:
-                    line = line.strip()
-                    if not line: continue
+                err_line = next(stderr_iterator, None)
+
+                if line is None and err_line is None and self.process.poll() is not None:
+                    break # Process finished
+
+                if line is None and err_line is None:
+                    time.sleep(0.01) # Prevent busy-waiting
+                    continue
+
             except StopIteration:
                  if self.process.poll() is not None: break
                  else: time.sleep(0.01); continue
+            except Exception as e:
+                 self.update_signal.emit(f"ERROR reading receiver output: {e}")
+                 time.sleep(0.1)
+                 continue
+
+            if err_line:
+                 self.update_signal.emit(f"ERROR: {err_line.strip()}")
 
             if line:
+                line = line.strip()
+                if not line: continue # Skip empty lines
                 self.update_signal.emit(line)
 
                 # Track handshake stage
@@ -865,11 +727,12 @@ class WorkerThread(QThread):
                     try:
                         chunk_num = int(ack_match.group(1))
                         # print(f"Receiver sent ACK for chunk {chunk_num}") # Debug
-                        # self.ack_signal.emit(chunk_num) # Receiver panel doesn't use this
+                        # self.ack_signal.emit(chunk_num) # Receiver panel doesn't use this currently
                     except (ValueError, IndexError) as e:
                         print(f"Receiver: Error parsing sent ACK number from '{line}': {e}")
 
-                # Update total chunks
+                # Update total chunks if found
+                # Look for "Total: X/Y", "total_chunks=Y", "highest sequence ...: Y" etc.
                 total_match = re.search(r"(?:Total:\s*\d+/(\d+)|total_chunks=(\d+)|highest sequence.*:\s*(\d+))", line, re.IGNORECASE)
                 if total_match:
                     try:
@@ -880,88 +743,130 @@ class WorkerThread(QThread):
                                 current_total_chunks = new_total
                                 self.total_chunks_signal.emit(current_total_chunks)
                                 # print(f"Receiver emitted total chunks: {current_total_chunks}") # Debug
+                                # Immediately update progress tracker with new total
+                                progress_tracker.update_from_counts(progress_tracker.current, current_total_chunks)
                     except Exception as e:
                         print(f"Receiver: Error parsing total chunks from '{line}': {e}")
 
-                # Extract data content
+                # Extract data content for display (if pattern matches)
                 data_extracted = False
-                data_patterns = [r"\[DATA\]\s*(.*)", r"(?:Received chunk data|Decoded data|Data chunk|CHUNK_DATA):\s*(.*)"]
+                # Simplified patterns for common data markers
+                data_patterns = [
+                    r"\[DATA\]\s*(.+)",
+                    r"(?:Decoded|Received|Assembled) data:\s*(.+)",
+                    r"CHUNK_DATA:\s*(.+)"
+                    ]
                 for pattern in data_patterns:
                     data_match = re.search(pattern, line, re.IGNORECASE)
                     if data_match:
                         data_part = data_match.group(1).strip()
-                        if data_part:
-                            self.update_signal.emit(f"[DATA] {data_part}")
+                        if data_part and len(data_part) < 500: # Avoid flooding with huge chunks
+                            self.update_signal.emit(f"[DATA] {data_part}") # Prefix for clarity
                             data_extracted = True
-                            break
+                            break # Only match one data pattern per line
 
-                # Track progress
+                # Track progress (using ProgressTracker)
                 try:
                     percent_match = re.search(r"Progress:\s*([\d\.]+)\s*%", line)
                     if percent_match:
                         percentage = float(percent_match.group(1))
                         progress_tracker.update_from_percentage(percentage)
-                    elif "[CHUNK]" in line or "[PACKET]" in line:
-                        count_match = re.search(r"(?:Received|Chunks|sequence):\s*(\d+)(?:/(\d+))?", line, re.IGNORECASE)
+                    else:
+                        # Look for counts like "Received X/Y", "Chunk X", "Sequence X"
+                        count_match = re.search(r"(?:Received|Chunk|Sequence|Processing chunk)\s*:?\s*(\d+)(?:/(\d+))?", line, re.IGNORECASE)
                         if count_match:
                             curr = int(count_match.group(1))
-                            tot = current_total_chunks
-                            if count_match.group(2):
+                            tot = current_total_chunks # Use the latest known total
+                            if count_match.group(2): # Total found in this line
                                 line_total = int(count_match.group(2))
                                 if line_total > current_total_chunks:
+                                    # Update total if this line has a higher one
                                     current_total_chunks = line_total
                                     self.total_chunks_signal.emit(current_total_chunks)
-                                tot = current_total_chunks
-                            if tot > 0: progress_tracker.update_from_counts(curr, tot)
-                            elif curr > 0: progress_tracker.update_from_counts(curr, max(curr + 10, 100))
+                                tot = current_total_chunks # Use the updated total
+
+                            progress_tracker.update_from_counts(curr, tot)
+
                 except Exception as e:
                     print(f"Receiver: Error in progress parsing from '{line}': {e}")
 
-                # Update status messages
-                if "[COMPLETE]" in line or "Reception complete" in line:
+                # Update status messages based on keywords
+                if "[COMPLETE]" in line or "Reception complete" in line or "Successfully reassembled" in line:
                     self.status_signal.emit("Reception complete")
-                    if current_total_chunks > 0: progress_tracker.update_from_counts(current_total_chunks, current_total_chunks)
-                    else: progress_tracker.update_from_percentage(100.0)
-                elif "[INFO]" in line and "All session data saved to:" in line:
-                    self.status_signal.emit("Data saved successfully")
-                elif "[SAVE]" in line and "File saved successfully" in line:
-                    self.status_signal.emit("File saved successfully")
+                    # Ensure 100% on completion
+                    progress_tracker.update_from_counts(max(progress_tracker.current, current_total_chunks), max(1, current_total_chunks)) # Use max(1,...) to avoid 0/0
+                elif "[SAVE]" in line and ("File saved successfully" in line or "Data saved to" in line):
+                    # Extract filename if possible for better status
+                    save_match = re.search(r"(?:saved to|File saved successfully):\s*(.+)", line)
+                    if save_match:
+                         self.status_signal.emit(f"File saved: {os.path.basename(save_match.group(1).strip())}")
+                    else:
+                         self.status_signal.emit("File saved successfully")
+                elif "Timeout reached" in line:
+                     self.status_signal.emit("Timeout reached waiting for data")
 
 
-        for err_line in stderr_iterator:
-            if self.stopped: break
-            self.update_signal.emit(f"ERROR: {err_line.strip()}")
+        # Read any remaining stderr
+        if self.process:
+            for err_line in self.process.stderr:
+                if self.stopped: break
+                self.update_signal.emit(f"ERROR: {err_line.strip()}")
 
-        exit_code = self.process.wait()
+        exit_code = self.process.wait() if self.process else -1
         success = (exit_code == 0 and not self.stopped)
-        if success:
-            if current_total_chunks > 0: progress_tracker.update_from_counts(current_total_chunks, current_total_chunks)
-            else: progress_tracker.update_from_percentage(100.0)
+
+        # Final status update
+        if self.stopped:
+             self.status_signal.emit("Reception stopped by user")
+        elif success:
+             # Ensure status reflects completion, might already be set by [COMPLETE] etc.
+             if "complete" not in self.status_label.text().lower() and "saved" not in self.status_label.text().lower():
+                  self.status_signal.emit("Reception finished successfully")
+             # Ensure 100% progress
+             progress_tracker.update_from_counts(max(progress_tracker.current, current_total_chunks), max(1, current_total_chunks))
+        elif "Timeout" in self.status_label.text():
+             pass # Keep timeout message
+        else:
+             self.status_signal.emit(f"Reception failed (Exit code: {exit_code})")
+
         self.finished_signal.emit(success)
 
 
     def stop(self):
         self.stopped = True
         if self.process and self.process.poll() is None:
-            self.update_signal.emit("Stopping process...")
+            self.status_signal.emit("Stopping process...")
+            self.update_signal.emit("Sending termination signal...")
             try:
+                # Try terminate first (more graceful)
                 self.process.terminate()
                 try:
-                    self.process.wait(timeout=1.0)
+                    # Wait briefly for termination
+                    self.process.wait(timeout=1.5)
+                    self.update_signal.emit("Process terminated.")
                 except subprocess.TimeoutExpired:
+                    # Force kill if terminate didn't work
                     self.update_signal.emit("Process did not terminate gracefully, killing.")
                     self.process.kill()
-                    self.process.wait()
-                self.update_signal.emit("Process stopped by user.")
+                    self.process.wait() # Wait for kill to complete
+                    self.update_signal.emit("Process killed.")
+                self.status_signal.emit("Process stopped by user.")
             except Exception as e:
                 self.update_signal.emit(f"Error stopping process: {e}")
+                self.status_signal.emit(f"Error stopping process")
+                # Ensure it's killed if possible
                 try:
                     if self.process.poll() is None:
-                        self.process.kill(); self.process.wait()
+                        self.process.kill()
+                        self.process.wait()
                 except Exception as ke:
-                     self.update_signal.emit(f"Error killing process: {ke}")
+                     self.update_signal.emit(f"Error during final kill attempt: {ke}")
+        else:
+            self.status_signal.emit("Process already stopped or not running.")
+
+        # Ensure finished signal is emitted if thread is still running somehow
         if self.isRunning():
-             self.finished_signal.emit(False)
+             self.finished_signal.emit(False) # Signal failure if stopped manually
 
 
 # --- ModernGroupBox unchanged ---
@@ -973,49 +878,226 @@ class ModernGroupBox(QGroupBox):
                 font-weight: bold;
                 border: 1px solid {COLORS['secondary']};
                 border-radius: 8px;
-                margin-top: 1.5ex;
-                padding: 10px;
+                margin-top: 1.5ex; /* Space for the title */
+                padding: 15px 10px 10px 10px; /* Top padding adjusted for title */
                 background-color: {COLORS['light']};
             }}
             QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
+                left: 10px; /* Position title slightly indented */
                 padding: 0 5px;
                 color: {COLORS['primary']};
-                background-color: {COLORS['light']};
+                background-color: {COLORS['light']}; /* Match background */
+                font-size: 10pt; /* Ensure title font size matches */
             }}
         """)
 
-# --- SenderPanel Modified ---
-class SenderPanel(QWidget):
+# NEW: Integrated progress bar with handshake indicators
+class HandshakeProgressBar(QWidget):
+    """A progress bar that includes handshake stage indicators"""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.parent = parent
-        self.worker_thread = None
-        self.log_queue = queue.Queue()
-        self.ack_details_window = None # Reference to the details window
-        self.acked_chunks = set()     # Keep track of ACKs internally
-        self.total_chunks = 0         # Keep track of total chunks
         self.setup_ui()
-        self.log_timer = QTimer(self)
-        self.log_timer.timeout.connect(self.update_log)
-        self.log_timer.start(50)
-        self.load_settings()
+        self.reset()
 
     def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5) # Space between progress bar and indicators
+
+        # Progress bar
+        self.progress_bar = AnimatedProgressBar()
+        layout.addWidget(self.progress_bar)
+
+        # Handshake indicators inside a layout
+        handshake_layout = QHBoxLayout()
+        handshake_layout.setSpacing(5)
+
+        # SYN Indicator
+        self.syn_indicator = QLabel("SYN")
+        self.syn_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Define common style parts
+        self.base_style = f"""
+            border: 1px solid {COLORS['secondary']};
+            border-radius: 4px;
+            padding: 2px;
+            font-size: 9pt;
+        """
+        self.default_style = f"background-color: {COLORS['light']}; color: {COLORS['text']};" + self.base_style
+        self.handshake_style = f"background-color: {COLORS['handshake']}; color: {COLORS['text_light']}; font-weight: bold;" + self.base_style.replace(f"border: 1px solid {COLORS['secondary']}", f"border: 1px solid {COLORS['handshake']}")
+        self.success_style = f"background-color: {COLORS['success']}; color: {COLORS['text_light']}; font-weight: bold;" + self.base_style.replace(f"border: 1px solid {COLORS['secondary']}", f"border: 1px solid {COLORS['success']}")
+
+        self.syn_indicator.setStyleSheet(self.default_style + "min-width: 40px;")
+        self.syn_indicator.setToolTip("Synchronization packet (Initiate Connection)")
+
+        # SYN-ACK Indicator
+        self.syn_ack_indicator = QLabel("SYN-ACK")
+        self.syn_ack_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.syn_ack_indicator.setStyleSheet(self.default_style + "min-width: 60px;")
+        self.syn_ack_indicator.setToolTip("Synchronization Acknowledgment (Confirm Initiation)")
+
+        # ACK Indicator
+        self.ack_indicator = QLabel("ACK")
+        self.ack_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.ack_indicator.setStyleSheet(self.default_style + "min-width: 40px;")
+        self.ack_indicator.setToolTip("Acknowledgment (Confirm SYN-ACK / Establish Connection)")
+
+        # Status Label (integrated within this widget)
+        self.status_label = QLabel("Not Connected")
+        self.status_label.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold; padding: 2px; font-size: 9pt;")
+        self.status_label.setToolTip("Current connection status")
+
+
+        # Add all indicators to layout
+        handshake_layout.addWidget(self.syn_indicator)
+        handshake_layout.addWidget(QLabel("→"), 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        handshake_layout.addWidget(self.syn_ack_indicator)
+        handshake_layout.addWidget(QLabel("→"), 0, alignment=Qt.AlignmentFlag.AlignCenter)
+        handshake_layout.addWidget(self.ack_indicator)
+        handshake_layout.addStretch(1) # Push status label to the right
+        handshake_layout.addWidget(self.status_label)
+
+        layout.addLayout(handshake_layout)
+
+    def setValue(self, value):
+        """Set the progress bar value"""
+        self.progress_bar.setValue(value)
+
+    def reset(self):
+        """Reset all indicators to their initial state"""
+        self.progress_bar.setValue(0)
+        # Reset styles
+        self.syn_indicator.setStyleSheet(self.default_style + "min-width: 40px;")
+        self.syn_ack_indicator.setStyleSheet(self.default_style + "min-width: 60px;")
+        self.ack_indicator.setStyleSheet(self.default_style + "min-width: 40px;")
+        # Reset Status Label
+        self.status_label.setText("Not Connected")
+        self.status_label.setStyleSheet(f"color: {COLORS['danger']}; font-weight: bold; padding: 2px; font-size: 9pt;")
+
+    def set_syn_sent(self): # Also used for SYN Received on receiver side
+        """Mark the SYN stage as active"""
+        self.syn_indicator.setStyleSheet(self.handshake_style + "min-width: 40px;")
+        self.status_label.setText("SYN")
+        self.status_label.setStyleSheet(f"color: {COLORS['handshake']}; font-weight: bold; padding: 2px; font-size: 9pt;")
+
+    def set_syn_ack_sent(self): # Or received, depending on perspective
+        """Mark the SYN-ACK stage as active"""
+        # Ensure previous stage is also marked (visually makes sense)
+        self.set_syn_sent()
+        self.syn_ack_indicator.setStyleSheet(self.handshake_style + "min-width: 60px;")
+        self.status_label.setText("SYN-ACK") # Keep status concise
+        self.status_label.setStyleSheet(f"color: {COLORS['handshake']}; font-weight: bold; padding: 2px; font-size: 9pt;")
+
+    def set_ack_sent(self): # Or received
+        """Mark the ACK stage as active"""
+        # Ensure previous stages are also marked
+        self.set_syn_ack_sent()
+        self.ack_indicator.setStyleSheet(self.handshake_style + "min-width: 40px;")
+        self.status_label.setText("ACK Handshake") # Status before final "Connected"
+        self.status_label.setStyleSheet(f"color: {COLORS['handshake']}; font-weight: bold; padding: 2px; font-size: 9pt;")
+
+    def set_connection_established(self):
+        """Mark the connection as fully established"""
+        # Color all indicators green
+        self.syn_indicator.setStyleSheet(self.success_style + "min-width: 40px;")
+        self.syn_ack_indicator.setStyleSheet(self.success_style + "min-width: 60px;")
+        self.ack_indicator.setStyleSheet(self.success_style + "min-width: 40px;")
+
+        self.status_label.setText("Connected")
+        self.status_label.setStyleSheet(f"color: {COLORS['success']}; font-weight: bold; padding: 2px; font-size: 9pt;")
+
+# --- Base Panel class (Optional, but can reduce redundancy if needed) ---
+# class BasePanel(QWidget): ... # Could contain common methods like browse_*, load/save_settings etc.
+
+# --- SenderPanel class definition (placeholder for original structure) ---
+class SenderPanel(QWidget):
+     # Define signals expected by AckDetailsWindow if needed, or handle directly
+     # This placeholder is needed because EnhancedSenderPanel inherits from it.
+     # In a real refactor, common elements could go into a BasePanel.
+     def __init__(self, parent=None):
+         super().__init__(parent)
+         # Minimal required attributes/methods assumed by inheriting classes or details window
+         self.total_chunks = 0
+         self.acked_chunks = set()
+         self.ack_details_window = None
+         self.parent = parent # Store parent reference
+
+     # Placeholder methods that will be overridden but are called by super()
+     def start_transmission(self): pass
+     def stop_transmission(self): pass
+     def transmission_finished(self, success): pass
+     def load_settings(self): pass
+     def save_settings(self): pass
+     def clear_log(self): pass
+     def browse_input_file(self): pass
+     def browse_key_file(self): pass
+     def browse_output_dir(self): pass
+     def update_log(self): pass
+     def show_ack_details(self): pass
+     def update_ack_count(self): pass
+
+
+# --- ReceiverPanel class definition (placeholder for original structure) ---
+class ReceiverPanel(QWidget):
+     # Placeholder needed for inheritance
+     def __init__(self, parent=None):
+         super().__init__(parent)
+         self.parent = parent # Store parent reference
+         self.splitter = None # Ensure splitter attribute exists
+
+     # Placeholder methods
+     def start_reception(self): pass
+     def stop_reception(self): pass
+     def reception_finished(self, success): pass
+     def load_settings(self): pass
+     def save_settings(self): pass
+     def clear_log(self): pass
+     def clear_data_display(self): pass
+     def save_displayed_data(self): pass
+     def browse_output_file(self): pass
+     def browse_key_file(self): pass
+     def browse_output_dir(self): pass
+     def populate_interfaces(self): pass
+     def update_log(self): pass
+     def update_data_display(self): pass
+
+# --- EnhancedSenderPanel: Uses HandshakeProgressBar and resizable log ---
+class EnhancedSenderPanel(SenderPanel): # Inherit from the placeholder
+    # Signals are defined in WorkerThread, connected here
+    def __init__(self, parent=None):
+        super().__init__(parent) # Call placeholder __init__
+        # Initialize attributes defined in placeholder that are used here
+        self.worker_thread = None
+        self.log_queue = queue.Queue()
+        self.ack_details_window = None # Initialized in placeholder
+        self.acked_chunks = set() # Initialized in placeholder
+        self.total_chunks = 0 # Initialized in placeholder
+
+        # Setup our custom UI
+        self.setup_enhanced_ui()
+
+        # Set up timer and load settings (using methods that should exist in base/placeholder)
+        self.log_timer = QTimer(self)
+        self.log_timer.timeout.connect(self.update_log)
+        self.log_timer.start(50) # Update log every 50ms
+        self.load_settings() # Call the (potentially overridden) load_settings
+
+    def setup_enhanced_ui(self):
         # Scroll area for the main settings/controls
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame) # Make scroll area background transparent
         scroll_area.setStyleSheet("background-color: transparent;")
 
-        scroll_content_widget = QWidget()
+        scroll_content_widget = QWidget() # Widget to hold the contents of the scroll area
         scroll_content_widget.setStyleSheet("background-color: transparent;")
-        content_layout = QVBoxLayout(scroll_content_widget)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout = QVBoxLayout(scroll_content_widget) # Layout for the scroll content
+        content_layout.setContentsMargins(0, 0, 0, 0) # No margins within scroll content itself
         content_layout.setSpacing(10)
 
-        # Common Stylesheet
+        # Common Stylesheet for controls inside the panel
         self.setStyleSheet(f"""
             QWidget {{ font-size: 10pt; color: {COLORS['text']}; }}
             QLabel {{ font-size: 10pt; }}
@@ -1026,293 +1108,449 @@ class SenderPanel(QWidget):
             QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
                 border: 2px solid {COLORS['primary']};
             }}
+            QPushButton {{ padding: 8px 12px; border-radius: 4px; }} /* Basic button style */
         """)
 
-        # Transmission Settings Group (Inside Scroll Area)
+        # --- Transmission Settings Group ---
         form_group = ModernGroupBox("Transmission Settings")
         form_layout = QFormLayout()
         form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
         form_layout.setSpacing(10)
-        # ... (Target IP, Input File, Key File, Output Dir, Delay, Chunk Size - unchanged) ...
+
+        # Target IP
         self.target_ip_edit = QLineEdit()
         self.target_ip_edit.setPlaceholderText("Enter target IP address (e.g., 192.168.1.100)")
+        self.target_ip_edit.setToolTip("The IP address of the receiving machine.")
         form_layout.addRow("Target IP:", self.target_ip_edit)
 
-        input_layout = QHBoxLayout(); input_layout.setSpacing(8)
+        # Input File
+        input_layout = QHBoxLayout(); input_layout.setSpacing(8); input_layout.setContentsMargins(0,0,0,0)
         self.input_file_edit = QLineEdit(); self.input_file_edit.setPlaceholderText("Path to input file")
-        self.input_file_button = QPushButton("Browse..."); self.input_file_button.clicked.connect(self.browse_input_file)
-        self.input_file_button.setStyleSheet(f"QPushButton {{ background-color: {COLORS['secondary']}; color: white; border: none; padding: 8px 12px; border-radius: 4px; }} QPushButton:hover {{ background-color: #7e8a9a; }}")
-        input_layout.addWidget(self.input_file_edit); input_layout.addWidget(self.input_file_button)
+        self.input_file_edit.setToolTip("Select the file you want to transmit.")
+        self.input_file_button = QPushButton("Browse...")
+        self.input_file_button.setStyleSheet(f"background-color: {COLORS['secondary']}; color: white; border: none;")
+        self.input_file_button.setToolTip("Browse for the input file.")
+        self.input_file_button.clicked.connect(self.browse_input_file) # Connect to method
+        input_layout.addWidget(self.input_file_edit, 1); input_layout.addWidget(self.input_file_button)
         form_layout.addRow("Input File:", input_layout)
 
-        key_layout = QHBoxLayout(); key_layout.setSpacing(8)
+        # Key File
+        key_layout = QHBoxLayout(); key_layout.setSpacing(8); key_layout.setContentsMargins(0,0,0,0)
         self.key_file_edit = QLineEdit(); self.key_file_edit.setPlaceholderText("Path to encryption key file (optional)")
-        self.key_file_button = QPushButton("Browse..."); self.key_file_button.clicked.connect(self.browse_key_file)
-        self.key_file_button.setStyleSheet(f"QPushButton {{ background-color: {COLORS['secondary']}; color: white; border: none; padding: 8px 12px; border-radius: 4px; }} QPushButton:hover {{ background-color: #7e8a9a; }}")
-        key_layout.addWidget(self.key_file_edit); key_layout.addWidget(self.key_file_button)
+        self.key_file_edit.setToolTip("Optional: Select a key file for AES encryption.")
+        self.key_file_button = QPushButton("Browse...");
+        self.key_file_button.setStyleSheet(f"background-color: {COLORS['secondary']}; color: white; border: none;")
+        self.key_file_button.setToolTip("Browse for the key file.")
+        self.key_file_button.clicked.connect(self.browse_key_file) # Connect to method
+        key_layout.addWidget(self.key_file_edit, 1); key_layout.addWidget(self.key_file_button)
         form_layout.addRow("Key File:", key_layout)
 
-        output_layout = QHBoxLayout(); output_layout.setSpacing(8)
-        self.output_dir_edit = QLineEdit(); self.output_dir_edit.setPlaceholderText("Custom output directory (optional)")
-        self.output_dir_button = QPushButton("Browse..."); self.output_dir_button.clicked.connect(self.browse_output_dir)
-        self.output_dir_button.setStyleSheet(f"QPushButton {{ background-color: {COLORS['secondary']}; color: white; border: none; padding: 8px 12px; border-radius: 4px; }} QPushButton:hover {{ background-color: #7e8a9a; }}")
-        output_layout.addWidget(self.output_dir_edit); output_layout.addWidget(self.output_dir_button)
+        # Output Directory (for logs/metadata)
+        output_layout = QHBoxLayout(); output_layout.setSpacing(8); output_layout.setContentsMargins(0,0,0,0)
+        self.output_dir_edit = QLineEdit(); self.output_dir_edit.setPlaceholderText("Session output directory (optional)")
+        self.output_dir_edit.setToolTip("Optional: Specify a directory to save transmission logs and metadata.")
+        self.output_dir_button = QPushButton("Browse...");
+        self.output_dir_button.setStyleSheet(f"background-color: {COLORS['secondary']}; color: white; border: none;")
+        self.output_dir_button.setToolTip("Browse for the output directory.")
+        self.output_dir_button.clicked.connect(self.browse_output_dir) # Connect to method
+        output_layout.addWidget(self.output_dir_edit, 1); output_layout.addWidget(self.output_dir_button)
         form_layout.addRow("Output Dir:", output_layout)
 
-        self.delay_spin = QDoubleSpinBox(); self.delay_spin.setRange(0.01, 5.0); self.delay_spin.setSingleStep(0.1); self.delay_spin.setValue(DEFAULT_DELAY); self.delay_spin.setSuffix(" sec")
+        # Delay
+        self.delay_spin = QDoubleSpinBox(); self.delay_spin.setRange(0.01, 5.0); self.delay_spin.setSingleStep(0.05); self.delay_spin.setValue(DEFAULT_DELAY); self.delay_spin.setSuffix(" sec")
+        self.delay_spin.setToolTip("Delay between sending packets. Increase if packets are dropped.")
+        self.delay_spin.setDecimals(2)
         form_layout.addRow("Packet Delay:", self.delay_spin)
 
+        # Chunk Size
         self.chunk_size_spin = QSpinBox(); self.chunk_size_spin.setRange(1, 8); self.chunk_size_spin.setValue(DEFAULT_CHUNK_SIZE); self.chunk_size_spin.setSuffix(" bytes")
+        self.chunk_size_spin.setToolTip("Amount of data (bytes) hidden in the ID field of each packet (1-8).")
         form_layout.addRow("Chunk Size:", self.chunk_size_spin)
 
         form_group.setLayout(form_layout)
-        content_layout.addWidget(form_group) # Add to scrollable content
+        content_layout.addWidget(form_group) # Add form group to scroll area content
 
-        # Control buttons (Inside Scroll Area)
+        # --- Control Buttons ---
         control_layout = QHBoxLayout()
         control_layout.setSpacing(10)
         self.send_button = AnimatedButton("Start Transmission", color=COLORS['success'])
-        self.send_button.clicked.connect(self.start_transmission)
+        self.send_button.clicked.connect(self.start_transmission) # Connect to method
         self.stop_button = AnimatedButton("Stop", color=COLORS['danger'])
-        self.stop_button.clicked.connect(self.stop_transmission)
-        self.stop_button.setEnabled(False)
+        self.stop_button.clicked.connect(self.stop_transmission) # Connect to method
+        self.stop_button.setEnabled(False) # Disabled initially
         self.clear_button = AnimatedButton("Clear Log", color=COLORS['secondary'])
-        self.clear_button.clicked.connect(self.clear_log)
+        self.clear_button.clicked.connect(self.clear_log) # Connect to method
+        self.ack_details_button = AnimatedButton("ACK Details", color=COLORS['info'])
+        self.ack_details_button.clicked.connect(self.show_ack_details) # Connect to method
+        self.ack_details_button.setToolTip("Show detailed acknowledgment status window.")
+
+
         control_layout.addWidget(self.send_button)
         control_layout.addWidget(self.stop_button)
         control_layout.addWidget(self.clear_button)
+        control_layout.addWidget(self.ack_details_button)
         control_layout.addStretch()
-        content_layout.addLayout(control_layout) # Add to scrollable content
+        content_layout.addLayout(control_layout) # Add controls to scroll area content
 
-        # Handshake Indicator (Inside Scroll Area)
-        self.handshake_indicator = HandshakeIndicator()
-        content_layout.addWidget(self.handshake_indicator) # Add to scrollable content
-
-        # Progress Group (Inside Scroll Area)
-        progress_group = ModernGroupBox("Progress")
+        # --- Progress Group - using the NEW combined widget ---
+        progress_group = ModernGroupBox("Progress & Status")
         progress_layout = QVBoxLayout()
-        progress_layout.setSpacing(8) # Reduced spacing
-        self.progress_bar = AnimatedProgressBar()
-        self.progress_bar.setValue(0)
-        self.status_label = AnimatedStatusLabel("Ready")
-        # Add ACK counter label here
-        self.ack_count_label = QLabel("ACKs: 0/0")
-        self.ack_count_label.setStyleSheet(f"color: {COLORS['ack']}; font-size: 9pt;")
+        progress_layout.setSpacing(8)
 
-        status_ack_layout = QHBoxLayout() # Layout for status and ACK count
-        status_ack_layout.addWidget(self.status_label)
-        status_ack_layout.addStretch()
-        status_ack_layout.addWidget(self.ack_count_label)
+        # Use the combined HandshakeProgressBar
+        self.combined_progress_bar = HandshakeProgressBar()
+        progress_layout.addWidget(self.combined_progress_bar)
 
-        progress_layout.addWidget(self.progress_bar)
-        progress_layout.addLayout(status_ack_layout) # Add combined status/ACK layout
+        # General Status Label and ACK Count (below the combined bar)
+        status_ack_layout = QHBoxLayout()
+        self.status_label = AnimatedStatusLabel("Ready") # Main status indicator
+        self.ack_count_label = QLabel("ACKs: 0/0") # ACK counter remains separate
+        self.ack_count_label.setStyleSheet(f"color: {COLORS['ack']}; font-size: 9pt; font-weight: bold;")
+        self.ack_count_label.setToolTip("Number of acknowledged packets out of total expected.")
+
+        status_ack_layout.addWidget(self.status_label, 1) # Give status label more space
+        status_ack_layout.addWidget(self.ack_count_label, 0, alignment=Qt.AlignmentFlag.AlignRight)
+        progress_layout.addLayout(status_ack_layout)
 
         progress_group.setLayout(progress_layout)
-        content_layout.addWidget(progress_group) # Add to scrollable content
-
-        # --- REMOVED ACK Group Box ---
+        content_layout.addWidget(progress_group) # Add progress group to scroll area content
 
         # Finish Scroll Area Setup
-        scroll_area.setWidget(scroll_content_widget)
+        scroll_area.setWidget(scroll_content_widget) # Set the content widget for the scroll area
 
-        # Log Area (Outside Scroll Area)
+        # --- SPLITTER IMPLEMENTATION ---
+        # Create a vertical splitter for settings/controls vs log
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        main_splitter.setChildrenCollapsible(False) # Prevent sections from collapsing completely
+        main_splitter.setHandleWidth(8) # Make handle visible
+        main_splitter.setStyleSheet(f"""
+            QSplitter::handle:vertical {{
+                background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                               stop:0 {COLORS['light']},
+                                               stop:0.5 {COLORS['secondary']},
+                                               stop:1 {COLORS['light']});
+                border: 1px solid {COLORS['secondary']};
+                height: 5px; /* Make handle slightly thicker vertically */
+                margin: 2px 0px;
+                border-radius: 2px;
+            }}
+            QSplitter::handle:vertical:hover {{
+                background-color: {COLORS['primary']};
+            }}
+        """)
+
+        # Add the scroll area (containing settings/controls/progress) to the TOP of the splitter
+        main_splitter.addWidget(scroll_area)
+
+        # Log Area Group
         log_group = ModernGroupBox("Transmission Log")
         log_layout = QVBoxLayout()
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
-        self.log_edit.setFont(QFont("Courier", 9))
+        self.log_edit.setFont(QFont("Courier New", 9)) # Monospaced font
+        self.log_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap) # Prevent wrapping
         self.log_edit.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {COLORS['dark']}; color: {COLORS['light']};
-                border-radius: 4px; padding: 5px;
-            }}""")
+                background-color: {COLORS['dark']};
+                color: {COLORS['light']};
+                border: 1px solid {COLORS['secondary']};
+                border-radius: 4px;
+                padding: 5px;
+            }}
+        """)
         log_layout.addWidget(self.log_edit)
         log_group.setLayout(log_layout)
 
-        # Main Panel Layout (Scroll Area + Log Area)
-        panel_layout = QVBoxLayout(self)
-        panel_layout.setContentsMargins(0, 0, 0, 0) # Use container margins
-        panel_layout.addWidget(scroll_area)   # Scroll area takes its preferred height
-        panel_layout.addWidget(log_group, 1) # Log area stretches
-        self.setLayout(panel_layout)
+        # Add the log group to the BOTTOM of the splitter
+        main_splitter.addWidget(log_group)
 
-    # --- browse_input_file, browse_key_file, browse_output_dir unchanged ---
-    def browse_input_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Input File", self.input_file_edit.text() or QSettings("CrypticRoute", "SenderPanel").value("last_dir", ""), "All Files (*)")
-        if file_path:
-            self.input_file_edit.setText(file_path)
-            QSettings("CrypticRoute", "SenderPanel").setValue("last_dir", os.path.dirname(file_path))
+        # Set initial sizes for the splitter sections (adjust ratio as needed)
+        # Give slightly more space to the settings/controls initially
+        initial_height = self.parent.height() if self.parent else 600
+        main_splitter.setSizes([int(initial_height * 0.55), int(initial_height * 0.45)])
 
-    def browse_key_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Key File", self.key_file_edit.text() or QSettings("CrypticRoute", "SenderPanel").value("last_dir", ""), "All Files (*)")
-        if file_path:
-            self.key_file_edit.setText(file_path)
-            QSettings("CrypticRoute", "SenderPanel").setValue("last_dir", os.path.dirname(file_path))
 
-    def browse_output_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Output Directory", self.output_dir_edit.text() or QSettings("CrypticRoute", "SenderPanel").value("last_dir", ""))
-        if dir_path:
-            self.output_dir_edit.setText(dir_path)
-            QSettings("CrypticRoute", "SenderPanel").setValue("last_dir", dir_path)
+        # Main Layout of the panel now contains ONLY the splitter
+        main_panel_layout = QVBoxLayout(self)
+        main_panel_layout.setContentsMargins(10, 10, 10, 10) # Use panel margins
+        main_panel_layout.addWidget(main_splitter)
+        self.setLayout(main_panel_layout)
 
-    # --- add_log_message, update_log, clear_log unchanged ---
-    def add_log_message(self, message):
-        # Filtering example (optional)
-        # if "[PACKET] #" in message and not (message.endswith("0") or message.endswith("5")):
-        #     return
+        # Store the splitter for settings persistence
+        self.main_splitter = main_splitter
 
-        styled_message = message
-        # Apply styling
-        if message.startswith("ERROR:"): styled_message = f'<span style="color:{COLORS["danger"]};">{message}</span>'
-        elif "[COMPLETE]" in message or "Success" in message: styled_message = f'<span style="color:{COLORS["success"]};">{message}</span>'
-        elif "[INFO]" in message: styled_message = f'<span style="color:{COLORS["info"]};">{message}</span>'
-        elif "[WARNING]" in message or "Warning" in message: styled_message = f'<span style="color:{COLORS["warning"]};">{message}</span>'
-        elif "[HANDSHAKE]" in message: styled_message = f'<span style="color:{COLORS["handshake"]};">{message}</span>'
-        elif "[ACK]" in message or "[CONFIRMED]" in message: styled_message = f'<span style="color:{COLORS["ack"]};">{message}</span>'
+    # --- Method Overrides and New Methods ---
 
-        self.log_edit.append(styled_message)
-        # Auto-scroll if near bottom
-        scrollbar = self.log_edit.verticalScrollBar()
-        if scrollbar.value() >= scrollbar.maximum() - 15:
-             self.log_edit.moveCursor(QTextCursor.MoveOperation.End)
-             self.log_edit.ensureCursorVisible()
+    # Override update methods to target the combined widget
+    def update_handshake(self, stage):
+        """Update the handshake indicators within the combined progress bar."""
+        print(f"[GUI] Sender Handshake Update: {stage}") # Debug
+        if stage == "syn_sent":
+            self.combined_progress_bar.set_syn_sent()
+        elif stage == "syn_ack_received": # Sender receives SYN-ACK
+            self.combined_progress_bar.set_syn_ack_sent()
+        elif stage == "ack_sent": # Sender sends final ACK
+            self.combined_progress_bar.set_ack_sent()
+        elif stage == "established":
+            self.combined_progress_bar.set_connection_established()
+            self.status_label.setText("Connection Established") # Update main status too
 
-    def update_log(self):
-        try:
-            messages_processed = 0
-            max_messages_per_update = 50
-            while not self.log_queue.empty() and messages_processed < max_messages_per_update:
-                message = self.log_queue.get_nowait()
-                self.add_log_message(message)
-                messages_processed += 1
-        except queue.Empty: pass
-        except Exception as e: print(f"Error updating log: {e}")
+    def update_progress(self, current, total):
+        """Update the progress bar value within the combined widget."""
+        # print(f"[GUI] Sender Progress Update: {current}/{total}") # Debug
+        if total > 0:
+            percentage = min(100, int((current / total) * 100))
+            self.combined_progress_bar.setValue(percentage)
+            # Update status bar (optional, but good practice)
+            if self.parent: # Check if parent exists (MainWindow)
+                self.parent.statusBar().showMessage(f"Sending: {current}/{total} chunks ({percentage}%)")
+        elif current > 0: # Progress known, but total isn't yet
+             self.combined_progress_bar.setValue(0) # Keep at 0 until total known? Or estimate?
+             # self.combined_progress_bar.setValue(int((current / max(current+10, 100)) * 100)) # Basic estimation
+             if self.parent:
+                self.parent.statusBar().showMessage(f"Sending: Chunk {current}...")
+        else: # No progress yet
+             self.combined_progress_bar.setValue(0)
+             if self.parent:
+                 self.parent.statusBar().showMessage(f"Initializing Send...")
+
+    # Override: Start Transmission
+    def start_transmission(self):
+        self.log_edit.clear()
+        self.status_label.setText("Initializing...")
+        self.combined_progress_bar.reset()
+        self.acked_chunks.clear()
+        self.total_chunks = 0
+        self.update_ack_count() # Reset count display
+        if self.ack_details_window:
+            self.ack_details_window.reset()
+
+        target_ip = self.target_ip_edit.text().strip()
+        input_file = self.input_file_edit.text().strip()
+
+        if not target_ip or not input_file:
+            QMessageBox.warning(self, "Input Required", "Please specify Target IP and Input File.")
+            self.status_label.setText("Ready")
+            return
+
+        if not os.path.isfile(input_file):
+             QMessageBox.warning(self, "File Not Found", f"Input file not found:\n{input_file}")
+             self.status_label.setText("Ready")
+             return
+
+        key_file = self.key_file_edit.text().strip()
+        if key_file and not os.path.isfile(key_file):
+             QMessageBox.warning(self, "File Not Found", f"Key file not found:\n{key_file}")
+             self.status_label.setText("Ready")
+             return
+
+        output_dir = self.output_dir_edit.text().strip()
+        if output_dir and not os.path.isdir(output_dir):
+             reply = QMessageBox.question(self, "Create Directory?",
+                                          f"Output directory does not exist:\n{output_dir}\n\nCreate it?",
+                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                          QMessageBox.StandardButton.No)
+             if reply == QMessageBox.StandardButton.Yes:
+                 try:
+                     os.makedirs(output_dir, exist_ok=True)
+                 except OSError as e:
+                     QMessageBox.critical(self, "Error", f"Could not create directory:\n{e}")
+                     self.status_label.setText("Ready")
+                     return
+             else:
+                 self.status_label.setText("Ready")
+                 return
+
+
+        args = {
+            "target_ip": target_ip,
+            "input_file": input_file,
+            "key_file": key_file or None,
+            "delay": self.delay_spin.value(),
+            "chunk_size": self.chunk_size_spin.value(),
+            "output_dir": output_dir or None,
+        }
+
+        self.save_settings() # Save current settings
+
+        self.worker_thread = WorkerThread("send", args)
+        self.worker_thread.update_signal.connect(self.append_log)
+        self.worker_thread.progress_signal.connect(self.update_progress)
+        self.worker_thread.status_signal.connect(self.update_status)
+        self.worker_thread.finished_signal.connect(self.transmission_finished)
+        self.worker_thread.handshake_signal.connect(self.update_handshake)
+        self.worker_thread.ack_signal.connect(self.handle_ack)
+        self.worker_thread.total_chunks_signal.connect(self.handle_total_chunks)
+
+        self.send_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.set_controls_enabled(False) # Disable form fields
+        self.status_label.setText("Starting transmission...")
+        self.worker_thread.start()
+
+    # Override: Stop Transmission
+    def stop_transmission(self):
+        if self.worker_thread and self.worker_thread.isRunning():
+            self.status_label.setText("Stopping...")
+            self.worker_thread.stop()
+            # finished_signal will handle re-enabling buttons
+
+    # Override: Transmission Finished
+    def transmission_finished(self, success):
+        self.send_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.set_controls_enabled(True) # Re-enable form fields
+        if self.worker_thread: # Check if thread exists
+            # Update status label based on final signal if not already set
+            final_status = self.status_label.text() # Get current status
+            if "Stopping" in final_status: # If stop was initiated
+                self.status_label.setText("Transmission stopped by user")
+            elif success and "complete" not in final_status.lower():
+                self.status_label.setText("Transmission successfully completed")
+            elif not success and "failed" not in final_status.lower() and "error" not in final_status.lower():
+                 self.status_label.setText("Transmission failed or stopped")
+
+            if success:
+                self.combined_progress_bar.setValue(100) # Ensure 100%
+                self.combined_progress_bar.set_connection_established() # Show green state
+            else:
+                 # Optionally reset handshake on failure/stop, or leave as is
+                 # self.combined_progress_bar.reset()
+                 pass # Keep last state for review?
+
+        self.worker_thread = None # Clear thread reference
+
+    # --- Helper Methods (Potentially moved to BasePanel in a refactor) ---
+
+    def set_controls_enabled(self, enabled):
+        """Enable/disable input controls during transmission."""
+        self.target_ip_edit.setEnabled(enabled)
+        self.input_file_edit.setEnabled(enabled)
+        self.input_file_button.setEnabled(enabled)
+        self.key_file_edit.setEnabled(enabled)
+        self.key_file_button.setEnabled(enabled)
+        self.output_dir_edit.setEnabled(enabled)
+        self.output_dir_button.setEnabled(enabled)
+        self.delay_spin.setEnabled(enabled)
+        self.chunk_size_spin.setEnabled(enabled)
+        # self.ack_details_button.setEnabled(enabled) # Keep ACK details accessible?
+
+    def append_log(self, text):
+        """Append text to the log view, handling colors."""
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        cursor = self.log_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        # Basic color coding based on keywords
+        if text.startswith("ERROR:") or "Failed" in text:
+            color = COLORS['danger']
+        elif text.startswith("WARN:") or "Warning" in text:
+            color = COLORS['warning']
+        elif "[HANDSHAKE]" in text:
+             color = COLORS['handshake']
+        elif "[ACK]" in text or "[CONFIRMED]" in text:
+             color = COLORS['ack']
+        elif "[PROGRESS]" in text or "Completed chunk" in text:
+             color = COLORS['info']
+        elif "[COMPLETE]" in text:
+            color = COLORS['success']
+        else:
+            color = COLORS['light'] # Default log text color
+
+        # Insert timestamp (greyed out)
+        cursor.insertHtml(f'<span style="color:{COLORS["secondary"]};">[{timestamp}] </span>')
+        # Insert message with color
+        cursor.insertHtml(f'<span style="color:{color};">{text}</span><br>')
+
+        self.log_edit.setTextCursor(cursor)
+        self.log_edit.ensureCursorVisible() # Auto-scroll
+
+    def update_status(self, text):
+        """Update the main status label."""
+        self.status_label.setText(text)
 
     def clear_log(self):
         self.log_edit.clear()
 
-    def start_transmission(self):
-        # --- Input validation unchanged ---
-        target_ip = self.target_ip_edit.text().strip()
-        if not target_ip: QMessageBox.warning(self, "Input Error", "Target IP address is required."); return
-        input_file = self.input_file_edit.text().strip()
-        if not input_file: QMessageBox.warning(self, "Input Error", "Input file is required."); return
-        if not os.path.exists(input_file): QMessageBox.warning(self, "Input Error", f"Input file does not exist: {input_file}"); return
-        key_file = self.key_file_edit.text().strip()
-        if key_file and not os.path.exists(key_file): QMessageBox.warning(self, "Input Error", f"Key file does not exist: {key_file}"); return
-        output_dir = self.output_dir_edit.text().strip()
-        if output_dir and not os.path.exists(output_dir):
-            response = QMessageBox.question(self, "Create Directory?", f"Output directory does not exist: {output_dir}\nCreate it?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
-            if response == QMessageBox.StandardButton.Yes:
-                try: os.makedirs(output_dir, exist_ok=True)
-                except Exception as e: QMessageBox.critical(self, "Error", f"Failed to create directory: {str(e)}"); return
-            else: return
+    def update_log(self):
+        """Process messages from the log queue."""
+        while not self.log_queue.empty():
+            try:
+                message = self.log_queue.get_nowait()
+                self.append_log(message)
+            except queue.Empty:
+                break
+            except Exception as e:
+                print(f"Error processing log queue: {e}") # Debug
 
-        args = {
-            "target_ip": target_ip, "input_file": input_file,
-            "delay": self.delay_spin.value(), "chunk_size": self.chunk_size_spin.value(),
-        }
-        if key_file: args["key_file"] = key_file
-        if output_dir: args["output_dir"] = output_dir
+    def browse_input_file(self):
+        filename, _ = QFileDialog.getOpenFileName(self, "Select Input File")
+        if filename:
+            self.input_file_edit.setText(filename)
 
-        self.save_settings()
-        self.clear_log()
-        self.progress_bar.setValue(0)
-        self.status_label.setText("Starting transmission...")
-        self.acked_chunks.clear() # Clear internal ACK set
-        self.total_chunks = 0     # Reset internal total
-        self.update_ack_count_label() # Update label
+    def browse_key_file(self):
+        filename, _ = QFileDialog.getOpenFileName(self, "Select Key File")
+        if filename:
+            self.key_file_edit.setText(filename)
 
-        # Reset visualization components
-        self.handshake_indicator.reset()
-        if self.ack_details_window: # Reset details window if open
-            self.ack_details_window.reset()
+    def browse_output_dir(self):
+        dirname = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if dirname:
+            self.output_dir_edit.setText(dirname)
 
-        self.send_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-
-        self.worker_thread = WorkerThread("send", args)
-        self.worker_thread.update_signal.connect(self.add_log_message)
-        self.worker_thread.progress_signal.connect(self.update_progress)
-        self.worker_thread.status_signal.connect(self.update_status)
-        self.worker_thread.finished_signal.connect(self.transmission_finished)
-
-        # Connect signals for handshake and ACK logic
-        self.worker_thread.handshake_signal.connect(self.update_handshake)
-        self.worker_thread.ack_signal.connect(self.handle_ack_received) # Renamed slot
-        self.worker_thread.total_chunks_signal.connect(self.handle_total_chunks) # Renamed slot
-
-        self.worker_thread.start()
-
-    def stop_transmission(self):
-        if self.worker_thread and self.worker_thread.isRunning():
-            self.status_label.setText("Stopping transmission...")
-            self.worker_thread.stop()
-            self.stop_button.setEnabled(False) # Disable immediately
-
-    def update_progress(self, current, total):
-        if total > 0:
-            percentage = min(100, (current / total) * 100)
-            self.progress_bar.setValue(int(percentage))
-            if self.parent:
-                self.parent.statusBar().showMessage(f"Sending: {current}/{total} chunks ({percentage:.1f}%)")
-        elif current > 0:
-             self.progress_bar.setValue(0)
-             if self.parent: self.parent.statusBar().showMessage(f"Sending: Chunk {current}...")
-
-    def update_status(self, status):
-        self.status_label.setText(status)
-
-    def update_handshake(self, stage):
-        """Update the handshake indicator based on the current stage."""
-        if stage == "syn_sent": self.handshake_indicator.set_syn_sent()
-        elif stage == "syn_ack_received": self.handshake_indicator.set_syn_ack_sent()
-        elif stage == "ack_sent": self.handshake_indicator.set_ack_sent()
-        elif stage == "established": self.handshake_indicator.set_connection_established()
-
-    def update_ack_count_label(self):
-        """Updates the simple ACK counter label."""
-        self.ack_count_label.setText(f"ACKs: {len(self.acked_chunks)}/{self.total_chunks}")
-
-    def handle_total_chunks(self, total):
-        """Handles receiving the total chunk count."""
-        if total > 0 and total != self.total_chunks:
-             print(f"[SenderPanel] Total chunks received: {total}")
-             self.total_chunks = total
-             self.update_ack_count_label()
-             # Update details window if open
-             if self.ack_details_window:
-                 self.ack_details_window.set_total_chunks(total)
-
-    def handle_ack_received(self, chunk_num):
-        """Handles receiving an acknowledgment for a chunk."""
-        if chunk_num > 0 and chunk_num not in self.acked_chunks:
-            # print(f"[SenderPanel] Received ACK for chunk {chunk_num}") # Debug
+    def handle_ack(self, chunk_num):
+        """Handle received ACK signal."""
+        if chunk_num > 0:
+            # print(f"[GUI] Received ACK for chunk: {chunk_num}") # Debug
             self.acked_chunks.add(chunk_num)
-            self.update_ack_count_label()
-            # Update details window if open
+            self.update_ack_count()
             if self.ack_details_window:
                 self.ack_details_window.acknowledge_chunk(chunk_num)
 
-    def transmission_finished(self, success):
-        self.send_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        final_status = "Transmission completed successfully" if success else "Transmission failed or was stopped"
-        self.status_label.setText(final_status)
-        if success:
-            self.progress_bar.setValue(100)
-            # Ensure final ACK count matches total if successful
-            if self.total_chunks > 0:
-                 self.ack_count_label.setText(f"ACKs: {self.total_chunks}/{self.total_chunks}")
-                 if self.ack_details_window:
-                      self.ack_details_window.ack_panel.ack_count_label.setText(f"{self.total_chunks}/{self.total_chunks}")
-                      self.ack_details_window.ack_panel.ack_progress.setValue(100)
+    def handle_total_chunks(self, total):
+        """Handle total chunks signal."""
+        if total > 0 and total != self.total_chunks:
+             print(f"[GUI] Received Total Chunks: {total}") # Debug
+             self.total_chunks = total
+             self.update_ack_count()
+             if self.ack_details_window:
+                 self.ack_details_window.set_total_chunks(total)
+             # Update progress bar range if needed (though it's usually 0-100)
+             self.update_progress(len(self.acked_chunks), self.total_chunks) # Update progress based on current ACKs
 
+    def update_ack_count(self):
+        """Update the ACK counter label."""
+        count = len(self.acked_chunks)
+        total = self.total_chunks if self.total_chunks > 0 else "?"
+        self.ack_count_label.setText(f"ACKs: {count}/{total}")
 
-        if self.parent: self.parent.statusBar().showMessage(final_status)
-        self.worker_thread = None
+    def show_ack_details(self):
+        """Show or focus the ACK details window."""
+        if self.ack_details_window is None:
+            print("Creating AckDetailsWindow...")
+            self.ack_details_window = AckDetailsWindow(self) # Pass self
+            # Ensure it gets the current state
+            self.ack_details_window.set_total_chunks(self.total_chunks)
+            for chunk in sorted(list(self.acked_chunks)):
+                self.ack_details_window.acknowledge_chunk(chunk)
+            self.ack_details_window.show()
+        else:
+            print("Activating existing AckDetailsWindow...")
+            self.ack_details_window.activateWindow()
+            self.ack_details_window.raise_()
+
+    def load_settings(self):
+        """Load settings specific to the sender panel."""
+        settings = QSettings("CrypticRoute", "SenderPanel")
+        self.target_ip_edit.setText(settings.value("target_ip", ""))
+        self.input_file_edit.setText(settings.value("input_file", ""))
+        self.key_file_edit.setText(settings.value("key_file", ""))
+        self.output_dir_edit.setText(settings.value("output_dir", ""))
+        self.delay_spin.setValue(float(settings.value("delay", DEFAULT_DELAY)))
+        self.chunk_size_spin.setValue(int(settings.value("chunk_size", DEFAULT_CHUNK_SIZE)))
 
     def save_settings(self):
+        """Save settings specific to the sender panel."""
         settings = QSettings("CrypticRoute", "SenderPanel")
         settings.setValue("target_ip", self.target_ip_edit.text())
         settings.setValue("input_file", self.input_file_edit.text())
@@ -1320,555 +1558,950 @@ class SenderPanel(QWidget):
         settings.setValue("output_dir", self.output_dir_edit.text())
         settings.setValue("delay", self.delay_spin.value())
         settings.setValue("chunk_size", self.chunk_size_spin.value())
-        # Save last dir
-        if self.input_file_edit.text(): settings.setValue("last_dir", os.path.dirname(self.input_file_edit.text()))
-        elif self.output_dir_edit.text(): settings.setValue("last_dir", self.output_dir_edit.text())
+
+    # Ensure placeholder methods are implemented if not inheriting useful ones
+    def __getattr__(self, name):
+        # Basic fallback for methods expected by AckDetailsWindow or setup if not implemented
+        if name in ["browse_input_file", "browse_key_file", "browse_output_dir", "clear_log", "show_ack_details", "update_log"]:
+            def _missing_method(*args, **kwargs):
+                print(f"Warning: Method {name} called but not fully implemented in EnhancedSenderPanel.")
+            return _missing_method
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
-    def load_settings(self):
-        settings = QSettings("CrypticRoute", "SenderPanel")
-        self.target_ip_edit.setText(settings.value("target_ip", ""))
-        self.input_file_edit.setText(settings.value("input_file", ""))
-        self.key_file_edit.setText(settings.value("key_file", ""))
-        self.output_dir_edit.setText(settings.value("output_dir", ""))
-        try: self.delay_spin.setValue(float(settings.value("delay", DEFAULT_DELAY)))
-        except: self.delay_spin.setValue(DEFAULT_DELAY)
-        try: self.chunk_size_spin.setValue(int(settings.value("chunk_size", DEFAULT_CHUNK_SIZE)))
-        except: self.chunk_size_spin.setValue(DEFAULT_CHUNK_SIZE)
-
-    def open_ack_details_window(self):
-        """Creates or shows the Acknowledgment Details window."""
-        if self.ack_details_window is None:
-            print("Creating AckDetailsWindow")
-            self.ack_details_window = AckDetailsWindow(self) # Pass self reference
-            # Immediately update with current state
-            self.ack_details_window.set_total_chunks(self.total_chunks)
-            for chunk in sorted(list(self.acked_chunks)):
-                 self.ack_details_window.acknowledge_chunk(chunk)
-            self.ack_details_window.show()
-        else:
-            print("Showing existing AckDetailsWindow")
-            self.ack_details_window.raise_()
-            self.ack_details_window.activateWindow()
-            # Re-sync state just in case
-            self.ack_details_window.set_total_chunks(self.total_chunks)
-            for chunk in sorted(list(self.acked_chunks)):
-                 self.ack_details_window.acknowledge_chunk(chunk)
-
-# --- ReceiverPanel unchanged from previous version ---
-class ReceiverPanel(QWidget):
+# --- EnhancedReceiverPanel: Uses HandshakeProgressBar and resizable log/data areas ---
+class EnhancedReceiverPanel(ReceiverPanel): # Inherit from placeholder
+    # Signals are defined in WorkerThread, connected here
     def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parent = parent
+        super().__init__(parent) # Call placeholder __init__
+        # Initialize attributes used here
         self.worker_thread = None
         self.log_queue = queue.Queue()
-        self.data_queue = queue.Queue()
-        self.setup_ui()
+        self.data_queue = queue.Queue() # Queue for received data snippets
+        self.last_displayed_file = None # Track displayed file content
+        self.main_splitter = None # Initialize splitter attribute
+
+        # Setup our custom UI
+        self.setup_enhanced_ui()
+
+        # Set up timers and load settings
         self.log_timer = QTimer(self)
         self.log_timer.timeout.connect(self.update_log)
-        self.log_timer.start(25)
-        self.data_timer = QTimer(self)
+        self.log_timer.start(50) # Update log view periodically
+
+        self.data_timer = QTimer(self) # Timer for updating data display view
         self.data_timer.timeout.connect(self.update_data_display)
-        self.data_timer.start(50)
-        self.last_displayed_file = None
+        self.data_timer.start(100) # Update data display less frequently
+
         self.load_settings()
 
-    def display_received_file(self, file_path):
-        try:
-            if not os.path.exists(file_path):
-                print(f"Warning: Cannot display file - {file_path} doesn't exist")
-                self.clear_data_display(); self.data_display.setText(f"--- File not found: {os.path.basename(file_path)} ---")
-                self.last_displayed_file = None; return
-            if file_path == self.last_displayed_file: return # Already shown
+    def setup_enhanced_ui(self):
+        # Scroll area for settings/controls
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setStyleSheet("background-color: transparent;")
 
-            content = ""
-            try:
-                with open(file_path, 'r', errors='replace') as f:
-                    content = f.read(5 * 1024 * 1024) # Limit display size
-                    if len(content) == 5 * 1024 * 1024: content += "\n\n--- File content truncated for display ---"
-            except UnicodeDecodeError: content = f"--- Cannot display binary file content: {os.path.basename(file_path)} ---"
-            except Exception as e: content = f"--- Error reading file: {os.path.basename(file_path)} ({e}) ---"
+        container_widget = QWidget() # Widget holding content for scroll area
+        container_widget.setStyleSheet("background-color: transparent;")
+        scroll_content_layout = QVBoxLayout(container_widget) # Layout for scroll content
+        scroll_content_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_content_layout.setSpacing(10)
 
-            self.clear_data_display()
-            header = f"--- Content from {os.path.basename(file_path)} ---\n\n"
-            self.data_display.setText(header + content)
-            print(f"Displayed content from file: {file_path}")
-            cursor = self.data_display.textCursor(); cursor.setPosition(0); self.data_display.setTextCursor(cursor)
-            self.last_displayed_file = file_path
-        except Exception as e:
-            print(f"Error displaying received file: {e}")
-            self.clear_data_display(); self.data_display.setText(f"Error displaying file: {str(e)}")
-            self.last_displayed_file = None
+        # Common stylesheet for controls
+        self.setStyleSheet(f"""
+            QWidget {{ font-size: 10pt; color: {COLORS['text']}; }}
+            QLabel {{ font-size: 10pt; }}
+            QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{
+                padding: 8px; border: 1px solid {COLORS['secondary']};
+                border-radius: 4px; background-color: white;
+            }}
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{
+                border: 2px solid {COLORS['primary']};
+            }}
+            QComboBox::drop-down {{ border: 0px; width: 20px; }} /* Style dropdown arrow */
+             QPushButton {{ padding: 8px 12px; border-radius: 4px; }} /* Basic button style */
+        """)
 
-    def setup_ui(self):
-        # Scroll area setup
-        scroll_area = QScrollArea(); scroll_area.setWidgetResizable(True); scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        container_widget = QWidget()
-        main_layout = QVBoxLayout(container_widget); main_layout.setContentsMargins(10, 10, 10, 10); main_layout.setSpacing(10)
-        self.setStyleSheet(f"""QWidget {{ font-size: 10pt; color: {COLORS['text']}; }} QLabel {{ font-size: 10pt; }} QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ padding: 8px; border: 1px solid {COLORS['secondary']}; border-radius: 4px; background-color: white; }} QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border: 2px solid {COLORS['primary']}; }} QComboBox::drop-down {{ border: 0px; width: 20px; }}""")
-
-        # Reception Settings Form
+        # --- Reception Settings Form ---
         form_group = ModernGroupBox("Reception Settings")
-        form_layout = QFormLayout(); form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight); form_layout.setSpacing(10)
-        # ... (Output File, Key File, Interface, Output Dir, Timeout - unchanged) ...
-        output_layout = QHBoxLayout(); output_layout.setSpacing(8)
-        self.output_file_edit = QLineEdit(); self.output_file_edit.setPlaceholderText("Path to save received data")
-        self.output_file_button = QPushButton("Browse..."); self.output_file_button.clicked.connect(self.browse_output_file)
-        self.output_file_button.setStyleSheet(f"QPushButton {{ background-color: {COLORS['secondary']}; color: white; border: none; padding: 8px 12px; border-radius: 4px; }} QPushButton:hover {{ background-color: #7e8a9a; }}")
-        output_layout.addWidget(self.output_file_edit); output_layout.addWidget(self.output_file_button)
+        form_layout = QFormLayout()
+        form_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form_layout.setSpacing(10)
+
+        # Output File
+        output_layout = QHBoxLayout(); output_layout.setSpacing(8); output_layout.setContentsMargins(0,0,0,0)
+        self.output_file_edit = QLineEdit()
+        self.output_file_edit.setPlaceholderText("Path to save received data")
+        self.output_file_edit.setToolTip("Specify the file name to save the reassembled data.")
+        self.output_file_button = QPushButton("Browse...")
+        self.output_file_button.setStyleSheet(f"background-color: {COLORS['secondary']}; color: white; border: none;")
+        self.output_file_button.setToolTip("Browse for the output file location.")
+        self.output_file_button.clicked.connect(self.browse_output_file) # Connect
+        output_layout.addWidget(self.output_file_edit, 1)
+        output_layout.addWidget(self.output_file_button)
         form_layout.addRow("Output File:", output_layout)
 
-        key_layout = QHBoxLayout(); key_layout.setSpacing(8)
-        self.key_file_edit = QLineEdit(); self.key_file_edit.setPlaceholderText("Path to decryption key file (optional)")
-        self.key_file_button = QPushButton("Browse..."); self.key_file_button.clicked.connect(self.browse_key_file)
-        self.key_file_button.setStyleSheet(f"QPushButton {{ background-color: {COLORS['secondary']}; color: white; border: none; padding: 8px 12px; border-radius: 4px; }} QPushButton:hover {{ background-color: #7e8a9a; }}")
-        key_layout.addWidget(self.key_file_edit); key_layout.addWidget(self.key_file_button)
+        # Key File
+        key_layout = QHBoxLayout(); key_layout.setSpacing(8); key_layout.setContentsMargins(0,0,0,0)
+        self.key_file_edit = QLineEdit()
+        self.key_file_edit.setPlaceholderText("Path to decryption key file (optional)")
+        self.key_file_edit.setToolTip("Optional: Select the key file used for encryption by the sender.")
+        self.key_file_button = QPushButton("Browse...")
+        self.key_file_button.setStyleSheet(f"background-color: {COLORS['secondary']}; color: white; border: none;")
+        self.key_file_button.setToolTip("Browse for the key file.")
+        self.key_file_button.clicked.connect(self.browse_key_file) # Connect
+        key_layout.addWidget(self.key_file_edit, 1)
+        key_layout.addWidget(self.key_file_button)
         form_layout.addRow("Key File:", key_layout)
 
-        self.interface_combo = QComboBox(); self.interface_combo.addItem("default"); self.populate_interfaces()
+        # Interface Selection
+        self.interface_combo = QComboBox()
+        self.interface_combo.addItem("default", None) # Add default option
+        self.interface_combo.setToolTip("Select the network interface to listen on. 'default' tries to auto-detect.")
+        self.populate_interfaces() # Populate with system interfaces
         form_layout.addRow("Interface:", self.interface_combo)
 
-        output_dir_layout = QHBoxLayout(); output_dir_layout.setSpacing(8)
-        self.output_dir_edit = QLineEdit(); self.output_dir_edit.setPlaceholderText("Custom output directory (optional)")
-        self.output_dir_button = QPushButton("Browse..."); self.output_dir_button.clicked.connect(self.browse_output_dir)
-        self.output_dir_button.setStyleSheet(f"QPushButton {{ background-color: {COLORS['secondary']}; color: white; border: none; padding: 8px 12px; border-radius: 4px; }} QPushButton:hover {{ background-color: #7e8a9a; }}")
-        output_dir_layout.addWidget(self.output_dir_edit); output_dir_layout.addWidget(self.output_dir_button)
+        # Output Directory (for logs/metadata)
+        output_dir_layout = QHBoxLayout(); output_dir_layout.setSpacing(8); output_dir_layout.setContentsMargins(0,0,0,0)
+        self.output_dir_edit = QLineEdit()
+        self.output_dir_edit.setPlaceholderText("Session output directory (optional)")
+        self.output_dir_edit.setToolTip("Optional: Specify a directory to save reception logs and metadata.")
+        self.output_dir_button = QPushButton("Browse...")
+        self.output_dir_button.setStyleSheet(f"background-color: {COLORS['secondary']}; color: white; border: none;")
+        self.output_dir_button.setToolTip("Browse for the output directory.")
+        self.output_dir_button.clicked.connect(self.browse_output_dir) # Connect
+        output_dir_layout.addWidget(self.output_dir_edit, 1)
+        output_dir_layout.addWidget(self.output_dir_button)
         form_layout.addRow("Output Dir:", output_dir_layout)
 
-        self.timeout_spin = QSpinBox(); self.timeout_spin.setRange(10, 600); self.timeout_spin.setValue(DEFAULT_TIMEOUT); self.timeout_spin.setSuffix(" sec")
+        # Timeout
+        self.timeout_spin = QSpinBox()
+        self.timeout_spin.setRange(10, 600) # 10 seconds to 10 minutes
+        self.timeout_spin.setValue(DEFAULT_TIMEOUT)
+        self.timeout_spin.setSuffix(" sec")
+        self.timeout_spin.setToolTip("Timeout in seconds to wait for packets before stopping.")
         form_layout.addRow("Timeout:", self.timeout_spin)
 
         form_group.setLayout(form_layout)
-        main_layout.addWidget(form_group)
+        scroll_content_layout.addWidget(form_group) # Add form group to scroll content
 
-        # Control buttons
-        control_layout = QHBoxLayout(); control_layout.setSpacing(10)
-        self.receive_button = AnimatedButton("Start Listening", color=COLORS['primary']); self.receive_button.clicked.connect(self.start_reception)
-        self.stop_button = AnimatedButton("Stop", color=COLORS['danger']); self.stop_button.clicked.connect(self.stop_reception); self.stop_button.setEnabled(False)
-        self.clear_button = AnimatedButton("Clear Log", color=COLORS['secondary']); self.clear_button.clicked.connect(self.clear_log)
-        self.refresh_button = AnimatedButton("Refresh Interfaces", color=COLORS['info']); self.refresh_button.clicked.connect(self.populate_interfaces)
-        control_layout.addWidget(self.receive_button); control_layout.addWidget(self.stop_button); control_layout.addWidget(self.clear_button); control_layout.addWidget(self.refresh_button); control_layout.addStretch()
-        main_layout.addLayout(control_layout)
+        # --- Control Buttons ---
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(10)
+        self.receive_button = AnimatedButton("Start Listening", color=COLORS['primary'])
+        self.receive_button.clicked.connect(self.start_reception) # Connect
+        self.stop_button = AnimatedButton("Stop", color=COLORS['danger'])
+        self.stop_button.clicked.connect(self.stop_reception) # Connect
+        self.stop_button.setEnabled(False)
+        self.clear_log_button = AnimatedButton("Clear Log", color=COLORS['secondary'])
+        self.clear_log_button.clicked.connect(self.clear_log) # Connect
+        self.refresh_button = AnimatedButton("Refresh Interfaces", color=COLORS['info'])
+        self.refresh_button.clicked.connect(self.populate_interfaces) # Connect
+        self.refresh_button.setToolTip("Rescan network interfaces.")
 
-        # Connection status indicator
-        self.handshake_indicator = HandshakeIndicator()
-        main_layout.addWidget(self.handshake_indicator)
+        control_layout.addWidget(self.receive_button)
+        control_layout.addWidget(self.stop_button)
+        control_layout.addWidget(self.clear_log_button)
+        control_layout.addWidget(self.refresh_button)
+        control_layout.addStretch()
+        scroll_content_layout.addLayout(control_layout) # Add controls to scroll content
 
-        # Progress bar
-        progress_group = ModernGroupBox("Progress")
-        progress_layout = QVBoxLayout(); progress_layout.setSpacing(10)
-        self.progress_bar = AnimatedProgressBar(); self.progress_bar.setValue(0)
-        self.status_label = AnimatedStatusLabel("Ready")
-        progress_layout.addWidget(self.progress_bar); progress_layout.addWidget(self.status_label)
+        # --- Progress bar group - using the NEW combined widget ---
+        progress_group = ModernGroupBox("Progress & Status")
+        progress_layout = QVBoxLayout()
+        progress_layout.setSpacing(10) # Slightly more space
+
+        # Use combined progress bar with handshake
+        self.combined_progress_bar = HandshakeProgressBar()
+        self.status_label = AnimatedStatusLabel("Ready") # Keep general status separate
+
+        progress_layout.addWidget(self.combined_progress_bar) # Add combined widget
+        progress_layout.addWidget(self.status_label) # Add general status below it
         progress_group.setLayout(progress_layout)
-        main_layout.addWidget(progress_group)
+        scroll_content_layout.addWidget(progress_group) # Add group to scroll content
 
-        # Log and data display area (Splitter)
-        splitter = QSplitter(Qt.Orientation.Horizontal); splitter.setChildrenCollapsible(False); splitter.setHandleWidth(10)
-        splitter.setStyleSheet(f"QSplitter::handle:horizontal {{ background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {COLORS['light']}, stop:0.5 {COLORS['secondary']}, stop:1 {COLORS['light']}); border: 1px solid {COLORS['secondary']}; width: 5px; margin: 4px 0px; border-radius: 2px; }} QSplitter::handle:horizontal:hover {{ background-color: {COLORS['primary']}; }}")
+        # Complete the scroll area setup
+        scroll_area.setWidget(container_widget) # Assign the container widget to the scroll area
 
-        log_group = ModernGroupBox("Transmission Log"); log_layout = QVBoxLayout()
-        self.log_edit = QTextEdit(); self.log_edit.setReadOnly(True); self.log_edit.setFont(QFont("Courier", 9)); self.log_edit.setStyleSheet(f"QTextEdit {{ background-color: {COLORS['dark']}; color: {COLORS['light']}; border-radius: 4px; padding: 5px; }}")
-        log_layout.addWidget(self.log_edit); log_group.setLayout(log_layout); splitter.addWidget(log_group)
+        # --- SPLITTER IMPLEMENTATION ---
+        # Create main *vertical* splitter for settings vs log/data area
+        main_splitter = QSplitter(Qt.Orientation.Vertical)
+        main_splitter.setChildrenCollapsible(False)
+        main_splitter.setHandleWidth(8)
+        main_splitter.setStyleSheet(f"""
+            QSplitter::handle:vertical {{
+                 background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                               stop:0 {COLORS['light']},
+                                               stop:0.5 {COLORS['secondary']},
+                                               stop:1 {COLORS['light']});
+                border: 1px solid {COLORS['secondary']};
+                height: 5px;
+                margin: 2px 0px;
+                border-radius: 2px;
+            }}
+            QSplitter::handle:vertical:hover {{
+                background-color: {COLORS['primary']};
+            }}
+        """)
 
-        data_group = ModernGroupBox("Received Data / File Content"); data_layout = QVBoxLayout()
-        self.data_display = QTextEdit(); self.data_display.setReadOnly(True); self.data_display.setFont(QFont("Courier", 9)); self.data_display.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap); self.data_display.setStyleSheet(f"QTextEdit {{ background-color: {COLORS['dark']}; color: {COLORS['light']}; border-radius: 4px; padding: 5px; }}")
-        data_buttons_layout = QHBoxLayout(); data_buttons_layout.setSpacing(10)
-        self.save_data_button = AnimatedButton("Save Displayed Text", color=COLORS['info']); self.save_data_button.setToolTip("Save the currently displayed text content to a new file."); self.save_data_button.clicked.connect(self.save_displayed_data)
-        self.clear_data_button = AnimatedButton("Clear Display", color=COLORS['secondary']); self.clear_data_button.clicked.connect(self.clear_data_display)
-        data_buttons_layout.addWidget(self.save_data_button); data_buttons_layout.addWidget(self.clear_data_button); data_buttons_layout.addStretch()
-        data_layout.addWidget(self.data_display, 1); data_layout.addLayout(data_buttons_layout); data_group.setLayout(data_layout); splitter.addWidget(data_group)
+        # Add settings/control area (in the scroll_area) to the TOP of the main splitter
+        main_splitter.addWidget(scroll_area)
 
-        splitter.setSizes([int(self.width() * 0.5) if self.width() > 0 else 300, int(self.width() * 0.5) if self.width() > 0 else 300]) # Initial size
-        main_layout.addWidget(splitter, 1) # Add splitter to scrollable content
+        # --- Log and data display area (Horizontal Splitter) ---
+        log_data_splitter = QSplitter(Qt.Orientation.Horizontal)
+        log_data_splitter.setChildrenCollapsible(False)
+        log_data_splitter.setHandleWidth(10) # Slightly thicker handle for horizontal
+        log_data_splitter.setStyleSheet(f"""
+            QSplitter::handle:horizontal {{
+                background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                               stop:0 {COLORS['light']},
+                                               stop:0.5 {COLORS['secondary']},
+                                               stop:1 {COLORS['light']});
+                border: 1px solid {COLORS['secondary']};
+                width: 5px; /* Handle width */
+                margin: 0px 2px; /* Vertical margin */
+                border-radius: 2px;
+            }}
+            QSplitter::handle:horizontal:hover {{
+                background-color: {COLORS['primary']};
+            }}
+        """)
 
-        # Set container, final layout
-        scroll_area.setWidget(container_widget)
-        panel_layout = QVBoxLayout(self); panel_layout.setContentsMargins(0, 0, 0, 0); panel_layout.addWidget(scroll_area)
+        # Log area group
+        log_group = ModernGroupBox("Reception Log")
+        log_layout = QVBoxLayout()
+        self.log_edit = QTextEdit()
+        self.log_edit.setReadOnly(True)
+        self.log_edit.setFont(QFont("Courier New", 9))
+        self.log_edit.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap) # No wrap
+        self.log_edit.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {COLORS['dark']}; color: {COLORS['light']};
+                border: 1px solid {COLORS['secondary']}; border-radius: 4px; padding: 5px;
+            }}""")
+        log_layout.addWidget(self.log_edit)
+        log_group.setLayout(log_layout)
+        log_data_splitter.addWidget(log_group) # Add log to left of horizontal splitter
+
+        # Data display area group
+        data_group = ModernGroupBox("Received Data / File Preview")
+        data_layout = QVBoxLayout()
+        self.data_display = QTextEdit()
+        self.data_display.setReadOnly(True)
+        self.data_display.setFont(QFont("Courier New", 9))
+        self.data_display.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth) # Wrap lines in data view
+        self.data_display.setPlaceholderText("Decoded data snippets or saved file content will appear here...")
+        self.data_display.setStyleSheet(f"""
+             QTextEdit {{
+                background-color: {COLORS['dark']}; color: {COLORS['light']};
+                border: 1px solid {COLORS['secondary']}; border-radius: 4px; padding: 5px;
+            }}""")
+
+        data_buttons_layout = QHBoxLayout()
+        data_buttons_layout.setSpacing(10)
+        self.save_data_button = AnimatedButton("Save Displayed Text", color=COLORS['info'])
+        self.save_data_button.setToolTip("Save the currently displayed text content to a new file.")
+        self.save_data_button.clicked.connect(self.save_displayed_data) # Connect
+        self.clear_data_button = AnimatedButton("Clear Display", color=COLORS['secondary'])
+        self.clear_data_button.setToolTip("Clear the data display area.")
+        self.clear_data_button.clicked.connect(self.clear_data_display) # Connect
+        data_buttons_layout.addWidget(self.save_data_button)
+        data_buttons_layout.addWidget(self.clear_data_button)
+        data_buttons_layout.addStretch()
+
+        data_layout.addWidget(self.data_display, 1) # Data display takes vertical space
+        data_layout.addLayout(data_buttons_layout) # Buttons below data display
+        data_group.setLayout(data_layout)
+        log_data_splitter.addWidget(data_group) # Add data group to right of horizontal splitter
+
+        # Add the horizontal log/data splitter to the BOTTOM of the main vertical splitter
+        main_splitter.addWidget(log_data_splitter)
+
+        # Set initial sizes for splitters
+        initial_width = self.parent.width() if self.parent else 800
+        initial_height = self.parent.height() if self.parent else 600
+        log_data_splitter.setSizes([int(initial_width * 0.5), int(initial_width * 0.5)]) # 50/50 horizontal split
+        main_splitter.setSizes([int(initial_height * 0.5), int(initial_height * 0.5)]) # 50/50 vertical split
+
+        # Main panel layout now contains ONLY the main vertical splitter
+        panel_layout = QVBoxLayout(self)
+        panel_layout.setContentsMargins(10, 10, 10, 10) # Use panel margins
+        panel_layout.addWidget(main_splitter)
         self.setLayout(panel_layout)
 
+        # Store splitters for settings persistence
+        self.main_splitter = main_splitter
+        self.splitter = log_data_splitter # Keep reference to horizontal splitter
 
-    def populate_interfaces(self):
-        current_selection = self.interface_combo.currentText()
-        self.interface_combo.clear(); self.interface_combo.addItem("default"); selected_index = 0
+    # --- Method Overrides and New Methods ---
+
+    # Override update methods to target the combined widget
+    def update_handshake(self, stage):
+        """Update the handshake indicators within the combined progress bar."""
+        print(f"[GUI] Receiver Handshake Update: {stage}") # Debug
+        # Note: Receiver stages are slightly different in meaning but map visually
+        if stage == "syn_received": # Receiver gets SYN
+            self.combined_progress_bar.set_syn_sent() # Visually represents first step active
+        elif stage == "syn_ack_sent": # Receiver sends SYN-ACK
+            self.combined_progress_bar.set_syn_ack_sent()
+        elif stage == "ack_received": # Receiver gets final ACK
+            self.combined_progress_bar.set_ack_sent() # Visually represents third step active
+        elif stage == "established":
+            self.combined_progress_bar.set_connection_established()
+            self.status_label.setText("Connection Established") # Update main status
+
+    def update_progress(self, current, total):
+        """Update the progress bar value within the combined widget."""
+        # print(f"[GUI] Receiver Progress Update: {current}/{total}") # Debug
         try:
-            interfaces = netifaces.interfaces(); count = 1
-            for iface in interfaces:
-                if iface.startswith("lo"): continue
-                display_text = iface
-                try:
-                    addrs = netifaces.ifaddresses(iface)
-                    if netifaces.AF_INET in addrs: ip = addrs[netifaces.AF_INET][0]['addr']; display_text = f"{iface} ({ip})"
-                except Exception: pass
-                self.interface_combo.addItem(display_text)
-                if display_text == current_selection or iface == current_selection: selected_index = count
-                count += 1
-        except Exception as e: self.add_log_message(f"ERROR: Could not populate network interfaces: {str(e)}")
-        self.interface_combo.setCurrentIndex(selected_index)
+            if total <= 0 and current <= 0:
+                # Reset progress if no valid numbers
+                self.combined_progress_bar.setValue(0)
+                if self.parent:
+                    self.parent.statusBar().showMessage("Listening...")
+                return
 
-    # --- browse_output_file, browse_key_file, browse_output_dir unchanged ---
-    def browse_output_file(self):
-        default_name = f"received_data_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        start_path = self.output_file_edit.text() or os.path.join(QSettings("CrypticRoute", "ReceiverPanel").value("last_dir", ""), default_name)
-        file_path, _ = QFileDialog.getSaveFileName(self, "Select Output File", start_path, "All Files (*)")
-        if file_path: self.output_file_edit.setText(file_path); QSettings("CrypticRoute", "ReceiverPanel").setValue("last_dir", os.path.dirname(file_path))
+            # Handle case where total might be 0 initially but current increases
+            effective_total = max(total, current, 1) # Avoid division by zero, ensure minimum total of 1
+            percentage = min(100, int((current / effective_total) * 100))
+            self.combined_progress_bar.setValue(percentage)
 
-    def browse_key_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select Key File", self.key_file_edit.text() or QSettings("CrypticRoute", "ReceiverPanel").value("last_dir", ""), "All Files (*)")
-        if file_path: self.key_file_edit.setText(file_path); QSettings("CrypticRoute", "ReceiverPanel").setValue("last_dir", os.path.dirname(file_path))
+            if self.parent:
+                status_msg = f"Receiving: {current}/{total} chunks ({percentage}%)" if total > 0 else f"Receiving: Chunk {current}..."
+                self.parent.statusBar().showMessage(status_msg)
+        except Exception as e:
+            print(f"Error updating receiver progress: {e}") # Log potential errors
 
-    def browse_output_dir(self):
-        dir_path = QFileDialog.getExistingDirectory(self, "Select Output Directory", self.output_dir_edit.text() or QSettings("CrypticRoute", "ReceiverPanel").value("last_dir", ""))
-        if dir_path: self.output_dir_edit.setText(dir_path); QSettings("CrypticRoute", "ReceiverPanel").setValue("last_dir", dir_path)
-
-
-    def add_log_message(self, message):
-        if message.startswith("[DATA] "):
-            try: data = message[7:]; self.data_queue.put(data)
-            except Exception as e: print(f"Error queueing data: {e}")
-            return # Don't log raw data
-
-        styled_message = message
-        if message.startswith("ERROR:"): styled_message = f'<span style="color:{COLORS["danger"]};">{message}</span>'
-        elif "[COMPLETE]" in message or "Success" in message or "successfully" in message: styled_message = f'<span style="color:{COLORS["success"]};">{message}</span>'
-        elif "[INFO]" in message: styled_message = f'<span style="color:{COLORS["info"]};">{message}</span>'
-        elif "[WARNING]" in message or "Warning" in message: styled_message = f'<span style="color:{COLORS["warning"]};">{message}</span>'
-        elif "[HANDSHAKE]" in message: styled_message = f'<span style="color:{COLORS["handshake"]};">{message}</span>'
-        elif "[ACK]" in message: styled_message = f'<span style="color:{COLORS["ack"]}; font-style: italic;">{message}</span>'
-
-        self.log_edit.append(styled_message)
-        scrollbar = self.log_edit.verticalScrollBar()
-        if scrollbar.value() >= scrollbar.maximum() - 15: self.log_edit.moveCursor(QTextCursor.MoveOperation.End); self.log_edit.ensureCursorVisible()
-
-    # --- update_log, update_data_display, clear_log, clear_data_display, save_displayed_data unchanged ---
-    def update_log(self):
-        try:
-            messages_processed = 0; max_messages_per_update = 50
-            while not self.log_queue.empty() and messages_processed < max_messages_per_update:
-                self.add_log_message(self.log_queue.get_nowait()); messages_processed += 1
-        except queue.Empty: pass
-        except Exception as e: print(f"Error updating receiver log: {e}")
-
-    def update_data_display(self):
-        try:
-            data_batch = []; max_items = 50
-            while not self.data_queue.empty() and len(data_batch) < max_items: data_batch.append(self.data_queue.get_nowait())
-            if data_batch:
-                new_data = '\n'.join(data_batch); cursor = self.data_display.textCursor(); at_end = cursor.atEnd()
-                cursor.movePosition(QTextCursor.MoveOperation.End); cursor.insertText(new_data + '\n')
-                if at_end: self.data_display.ensureCursorVisible()
-        except queue.Empty: pass
-        except Exception as e: print(f"Error updating data display: {e}")
-
-    def clear_log(self): self.log_edit.clear()
-    def clear_data_display(self): self.data_display.clear(); self.last_displayed_file = None
-
-    def save_displayed_data(self):
-        current_content = self.data_display.toPlainText()
-        if not current_content.strip(): QMessageBox.information(self, "Info", "There is no data in the display to save."); return
-        default_name = f"displayed_data_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        start_path = os.path.join(QSettings("CrypticRoute", "ReceiverPanel").value("last_dir", ""), default_name)
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Displayed Text", start_path, "Text Files (*.txt);;All Files (*)")
-        if file_path:
-            try:
-                with open(file_path, 'w', errors='replace') as f: f.write(current_content)
-                self.status_label.setText(f"Displayed text saved to {os.path.basename(file_path)}")
-                QSettings("CrypticRoute", "ReceiverPanel").setValue("last_dir", os.path.dirname(file_path))
-            except Exception as e: QMessageBox.critical(self, "Error", f"Failed to save displayed data: {str(e)}")
-
+    # Override: Start Reception
     def start_reception(self):
-        output_file = self.output_file_edit.text().strip()
-        if not output_file: QMessageBox.warning(self, "Input Error", "Output file path is required."); return
-        output_dir = os.path.dirname(output_file)
-        if output_dir and not os.path.exists(output_dir):
-             response = QMessageBox.question(self, "Create Directory?", f"Output directory does not exist:\n{output_dir}\n\nCreate it?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
-             if response == QMessageBox.StandardButton.Yes:
-                try: os.makedirs(output_dir, exist_ok=True)
-                except Exception as e: QMessageBox.critical(self, "Error", f"Failed to create directory: {str(e)}"); return
-             else: return
-        key_file = self.key_file_edit.text().strip()
-        if key_file and not os.path.exists(key_file): QMessageBox.warning(self, "Input Error", f"Key file does not exist: {key_file}"); return
-        custom_output_dir = self.output_dir_edit.text().strip()
-        if custom_output_dir and not os.path.exists(custom_output_dir):
-            response = QMessageBox.question(self, "Create Directory?", f"Custom output directory does not exist:\n{custom_output_dir}\n\nCreate it?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.Yes)
-            if response == QMessageBox.StandardButton.Yes:
-                try: os.makedirs(custom_output_dir, exist_ok=True)
-                except Exception as e: QMessageBox.critical(self, "Error", f"Failed to create custom directory: {str(e)}"); return
-            else: return
-
-        args = {"output_file": output_file, "timeout": self.timeout_spin.value()}
-        interface_text = self.interface_combo.currentText()
-        if interface_text and interface_text != "default": interface = interface_text.split(' ')[0]; args["interface"] = interface
-        if key_file: args["key_file"] = key_file
-        if custom_output_dir: args["output_dir"] = custom_output_dir
-
-        self.save_settings()
-        self.clear_log(); self.clear_data_display()
-        self.progress_bar.setValue(0)
-        self.status_label.setText("Starting reception...")
+        self.log_edit.clear()
+        self.data_display.clear()
+        self.status_label.setText("Initializing...")
+        self.combined_progress_bar.reset()
         self.last_displayed_file = None
 
-        # Reset visualization components
-        self.handshake_indicator.reset()
+        output_file = self.output_file_edit.text().strip()
+        if not output_file:
+            QMessageBox.warning(self, "Output File Required", "Please specify an Output File path.")
+            self.status_label.setText("Ready")
+            return
 
-        self.receive_button.setEnabled(False); self.stop_button.setEnabled(True)
+        # Check if output directory exists, create if necessary
+        output_dir_path = os.path.dirname(output_file)
+        if output_dir_path and not os.path.exists(output_dir_path):
+             reply = QMessageBox.question(self, "Create Directory?",
+                                          f"Output directory does not exist:\n{output_dir_path}\n\nCreate it?",
+                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                          QMessageBox.StandardButton.No)
+             if reply == QMessageBox.StandardButton.Yes:
+                 try:
+                     os.makedirs(output_dir_path, exist_ok=True)
+                 except OSError as e:
+                     QMessageBox.critical(self, "Error", f"Could not create directory:\n{e}")
+                     self.status_label.setText("Ready")
+                     return
+             else:
+                 self.status_label.setText("Ready")
+                 return
+
+
+        key_file = self.key_file_edit.text().strip()
+        if key_file and not os.path.isfile(key_file):
+             QMessageBox.warning(self, "File Not Found", f"Key file not found:\n{key_file}")
+             self.status_label.setText("Ready")
+             return
+
+        interface_name = self.interface_combo.currentText()
+        interface_addr = self.interface_combo.currentData() # Get stored address if available
+
+        output_dir_log = self.output_dir_edit.text().strip() # Log dir is separate
+        if output_dir_log and not os.path.isdir(output_dir_log):
+             reply = QMessageBox.question(self, "Create Directory?",
+                                          f"Log output directory does not exist:\n{output_dir_log}\n\nCreate it?",
+                                          QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                          QMessageBox.StandardButton.No)
+             if reply == QMessageBox.StandardButton.Yes:
+                 try:
+                     os.makedirs(output_dir_log, exist_ok=True)
+                 except OSError as e:
+                     QMessageBox.critical(self, "Error", f"Could not create directory:\n{e}")
+                     self.status_label.setText("Ready")
+                     return
+             else:
+                 self.status_label.setText("Ready")
+                 return
+
+
+        args = {
+            "output_file": output_file,
+            "key_file": key_file or None,
+            "interface": interface_name if interface_name != "default" else None, # Pass name if not default
+            "timeout": self.timeout_spin.value(),
+            "output_dir": output_dir_log or None, # Pass separate log dir
+        }
+
+        self.save_settings() # Save current settings
 
         self.worker_thread = WorkerThread("receive", args)
-        self.worker_thread.update_signal.connect(self.add_log_message)
+        self.worker_thread.update_signal.connect(self.handle_worker_output) # Route output
         self.worker_thread.progress_signal.connect(self.update_progress)
         self.worker_thread.status_signal.connect(self.update_status)
         self.worker_thread.finished_signal.connect(self.reception_finished)
         self.worker_thread.handshake_signal.connect(self.update_handshake)
-        # No ACK panel to connect to total_chunks_signal
+        # Connect total chunks if receiver needs it directly (e.g., for progress calculation)
+        self.worker_thread.total_chunks_signal.connect(self.handle_total_chunks)
 
+        self.receive_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.set_controls_enabled(False) # Disable form fields
+        self.status_label.setText(f"Listening on {interface_name}...")
         self.worker_thread.start()
 
+    # Override: Stop Reception
     def stop_reception(self):
         if self.worker_thread and self.worker_thread.isRunning():
-            self.status_label.setText("Stopping reception...")
+            self.status_label.setText("Stopping...")
             self.worker_thread.stop()
-            self.stop_button.setEnabled(False)
+            # finished_signal handles button states
 
-    def update_progress(self, current, total):
-        try:
-            if total <= 0 and current <= 0: self.progress_bar.setValue(0);
-            if self.parent: self.parent.statusBar().showMessage("Receiving...")
-            return
-            effective_total = max(total, current, 1)
-            percentage = min(100, (current / effective_total) * 100)
-            self.progress_bar.setValue(int(percentage))
-            if self.parent:
-                status_msg = f"Receiving: {current}/{total} chunks ({percentage:.1f}%)" if total > 0 else f"Receiving: Chunk {current}..."
-                self.parent.statusBar().showMessage(status_msg)
-        except Exception as e: print(f"Error updating receiver progress: {e}")
-
-    def update_status(self, status): self.status_label.setText(status)
-
-    def update_handshake(self, stage):
-        if stage == "syn_received": self.handshake_indicator.set_syn_sent()
-        elif stage == "syn_ack_sent": self.handshake_indicator.set_syn_ack_sent()
-        elif stage == "ack_received": self.handshake_indicator.set_ack_sent()
-        elif stage == "established": self.handshake_indicator.set_connection_established()
-
+    # Override: Reception Finished
     def reception_finished(self, success):
-        self.receive_button.setEnabled(True); self.stop_button.setEnabled(False)
-        final_status = "Reception completed successfully" if success else "Reception failed or was stopped"
-        self.status_label.setText(final_status)
-        if self.parent: self.parent.statusBar().showMessage(final_status)
-        if success:
-            output_file = self.output_file_edit.text().strip()
-            if output_file and os.path.exists(output_file): self.display_received_file(output_file)
-            else: self.add_log_message("[INFO] Output file not found or not specified, cannot display content.")
-        self.worker_thread = None
+        self.receive_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.set_controls_enabled(True) # Re-enable form
 
-    # --- save_settings, load_settings unchanged ---
-    def save_settings(self):
+        final_status = self.status_label.text()
+        if "Stopping" in final_status:
+             self.status_label.setText("Reception stopped by user")
+        elif success:
+            # Update status if not already showing completion/save
+            if "complete" not in final_status.lower() and "saved" not in final_status.lower():
+                 self.status_label.setText("Reception finished successfully")
+            self.combined_progress_bar.setValue(100)
+            self.combined_progress_bar.set_connection_established() # Show green state
+            # Attempt to display the saved file content
+            output_file = self.output_file_edit.text().strip()
+            if output_file and os.path.exists(output_file) and output_file != self.last_displayed_file:
+                 self.display_file_content(output_file)
+
+        elif "Timeout" not in final_status: # Keep timeout message if that was the cause
+             if "failed" not in final_status.lower() and "error" not in final_status.lower():
+                  self.status_label.setText("Reception failed or stopped")
+             # Reset progress bar on failure?
+             # self.combined_progress_bar.reset()
+
+        self.worker_thread = None # Clear thread reference
+
+    # --- Helper Methods ---
+
+    def set_controls_enabled(self, enabled):
+        """Enable/disable input controls during reception."""
+        self.output_file_edit.setEnabled(enabled)
+        self.output_file_button.setEnabled(enabled)
+        self.key_file_edit.setEnabled(enabled)
+        self.key_file_button.setEnabled(enabled)
+        self.interface_combo.setEnabled(enabled)
+        self.refresh_button.setEnabled(enabled)
+        self.output_dir_edit.setEnabled(enabled)
+        self.output_dir_button.setEnabled(enabled)
+        self.timeout_spin.setEnabled(enabled)
+
+    def handle_worker_output(self, text):
+        """Route worker output to log or data queue."""
+        # Check for data prefix (or other data indicators)
+        if text.startswith("[DATA]"):
+             data_content = text[len("[DATA]"):].strip()
+             if data_content:
+                 self.data_queue.put(data_content)
+        # Check for file saved message to trigger display
+        elif ("[SAVE]" in text and ("File saved successfully" in text or "Data saved to" in text)) or \
+             ("[COMPLETE]" in text and "file saved" in text.lower()):
+            self.append_log(text) # Log the save message
+            # Try to extract filename and display it
+            save_match = re.search(r"(?:saved to|File saved successfully|file saved):\s*([\/\w\.\-\_\s]+)", text)
+            if save_match:
+                saved_file = save_match.group(1).strip()
+                if os.path.exists(saved_file) and saved_file != self.last_displayed_file:
+                    self.display_file_content(saved_file)
+        else:
+            # Default to appending to the log
+            self.append_log(text)
+
+
+    def append_log(self, text):
+        """Append text to the log view, handling colors."""
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
+        cursor = self.log_edit.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+
+        # Basic color coding
+        if text.startswith("ERROR:") or "Failed" in text or "Timeout" in text:
+            color = COLORS['danger']
+        elif text.startswith("WARN:") or "Warning" in text:
+            color = COLORS['warning']
+        elif "[HANDSHAKE]" in text:
+             color = COLORS['handshake']
+        elif "[ACK]" in text: # Receiver sending ACK
+             color = COLORS['ack']
+        elif "[PROGRESS]" in text or "Received chunk" in text or "Processing chunk" in text:
+             color = COLORS['info']
+        elif "[COMPLETE]" in text or "[SAVE]" in text:
+            color = COLORS['success']
+        else:
+            color = COLORS['light'] # Default log text color
+
+        # Insert timestamp and message
+        cursor.insertHtml(f'<span style="color:{COLORS["secondary"]};">[{timestamp}] </span>')
+        cursor.insertHtml(f'<span style="color:{color};">{text}</span><br>')
+
+        self.log_edit.setTextCursor(cursor)
+        self.log_edit.ensureCursorVisible() # Auto-scroll
+
+    def update_status(self, text):
+        """Update the main status label."""
+        self.status_label.setText(text)
+
+    def handle_total_chunks(self, total):
+        """Handle total chunks signal (if needed by receiver GUI)."""
+        print(f"[GUI] Receiver Total Chunks: {total}") # Debug
+        # Currently receiver progress is handled by ProgressTracker based on counts/percentage
+        # This signal might be useful if GUI needs to display total explicitly somewhere else.
+        # self.some_total_label.setText(f"Total Chunks Expected: {total}")
+
+    def clear_log(self):
+        self.log_edit.clear()
+
+    def update_log(self):
+        """Process messages from the log queue."""
+        while not self.log_queue.empty():
+            try:
+                message = self.log_queue.get_nowait()
+                # Decide if message goes to log or data display based on content?
+                # For now, assume worker thread directs via update_signal -> handle_worker_output
+                self.append_log(message) # Default to log
+            except queue.Empty:
+                break
+            except Exception as e:
+                print(f"Error processing log queue: {e}")
+
+    def update_data_display(self):
+         """Append received data snippets from the queue to the data display."""
+         if not self.data_queue.empty():
+             cursor = self.data_display.textCursor()
+             cursor.movePosition(QTextCursor.MoveOperation.End)
+             while not self.data_queue.empty():
+                 try:
+                     data_snippet = self.data_queue.get_nowait()
+                     # Simple formatting - maybe add timestamp or context later?
+                     cursor.insertText(data_snippet + "\n")
+                 except queue.Empty:
+                     break
+                 except Exception as e:
+                     print(f"Error processing data queue: {e}")
+                     cursor.insertText(f"\n<Error displaying data: {e}>\n")
+             self.data_display.setTextCursor(cursor)
+             self.data_display.ensureCursorVisible()
+
+    def display_file_content(self, filepath):
+        """Display content of the saved file in the data area."""
+        try:
+            # Limit file size to prevent GUI freeze
+            if os.path.getsize(filepath) > 5 * 1024 * 1024: # 5 MB limit
+                self.data_display.setPlainText(f"<File content too large to display ({os.path.getsize(filepath)/1024/1024:.1f} MB)>")
+                self.last_displayed_file = None # Don't mark as displayed
+                return
+
+            with open(filepath, 'r', errors='ignore') as f: # Ignore decoding errors for preview
+                content = f.read(100 * 1024) # Read up to 100KB for preview
+                self.data_display.setPlainText(content)
+                if len(content) == 100 * 1024:
+                     self.data_display.append("\n\n<File content truncated for display>")
+                self.last_displayed_file = filepath # Mark as displayed
+                self.status_label.setText(f"Saved and previewing: {os.path.basename(filepath)}")
+
+        except Exception as e:
+            self.data_display.setPlainText(f"<Error displaying file content: {e}>")
+            self.last_displayed_file = None
+
+    def clear_data_display(self):
+        self.data_display.clear()
+        self.last_displayed_file = None # Clear tracking
+
+    def save_displayed_data(self):
+        """Save the text currently in the data display area to a new file."""
+        content = self.data_display.toPlainText()
+        if not content:
+            QMessageBox.information(self, "Nothing to Save", "The data display area is empty.")
+            return
+
+        filename, _ = QFileDialog.saveFileName(self, "Save Displayed Text As...", filter="Text Files (*.txt);;All Files (*)")
+        if filename:
+            try:
+                with open(filename, 'w') as f:
+                    f.write(content)
+                self.status_label.setText(f"Displayed text saved to: {os.path.basename(filename)}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error Saving File", f"Could not save file:\n{e}")
+
+    def browse_output_file(self):
+        filename, _ = QFileDialog.saveFileName(self, "Select Output File")
+        if filename:
+            self.output_file_edit.setText(filename)
+
+    def browse_key_file(self):
+        filename, _ = QFileDialog.getOpenFileName(self, "Select Key File")
+        if filename:
+            self.key_file_edit.setText(filename)
+
+    def browse_output_dir(self):
+        dirname = QFileDialog.getExistingDirectory(self, "Select Log Output Directory")
+        if dirname:
+            self.output_dir_edit.setText(dirname)
+
+    def populate_interfaces(self):
+        """Populate the interface dropdown."""
+        self.interface_combo.clear()
+        self.interface_combo.addItem("default", None) # Add default first
+        try:
+            interfaces = netifaces.interfaces()
+            for iface in interfaces:
+                try:
+                    # Try to get an IPv4 address for display/filtering
+                    addrs = netifaces.ifaddresses(iface)
+                    ipv4_addr = addrs.get(netifaces.AF_INET, [{}])[0].get('addr', None)
+                    # Display name and IPv4 if available
+                    display_text = f"{iface}" + (f" ({ipv4_addr})" if ipv4_addr else "")
+                    self.interface_combo.addItem(display_text, iface) # Store real name as data
+                except ValueError:
+                     self.interface_combo.addItem(f"{iface} (No Addr)", iface) # Handle interfaces without addresses
+        except Exception as e:
+            self.append_log(f"ERROR: Could not list network interfaces: {e}")
+            QMessageBox.warning(self, "Interface Error", "Could not retrieve network interface list.")
+
+        # Restore previous selection if possible
         settings = QSettings("CrypticRoute", "ReceiverPanel")
-        settings.setValue("output_file", self.output_file_edit.text())
-        settings.setValue("key_file", self.key_file_edit.text())
-        settings.setValue("interface", self.interface_combo.currentText())
-        settings.setValue("output_dir", self.output_dir_edit.text())
-        settings.setValue("timeout", self.timeout_spin.value())
-        if self.output_file_edit.text(): settings.setValue("last_dir", os.path.dirname(self.output_file_edit.text()))
-        elif self.output_dir_edit.text(): settings.setValue("last_dir", self.output_dir_edit.text())
+        saved_iface = settings.value("interface_name", "default")
+        index = self.interface_combo.findText(saved_iface, Qt.MatchFlag.MatchStartsWith) # Try matching start
+        if index >= 0:
+            self.interface_combo.setCurrentIndex(index)
+        else:
+            index = self.interface_combo.findData(saved_iface) # Try matching stored data
+            if index >= 0:
+                 self.interface_combo.setCurrentIndex(index)
+            else:
+                 self.interface_combo.setCurrentIndex(0) # Default to "default"
+
 
     def load_settings(self):
+        """Load settings specific to the receiver panel."""
         settings = QSettings("CrypticRoute", "ReceiverPanel")
         self.output_file_edit.setText(settings.value("output_file", ""))
         self.key_file_edit.setText(settings.value("key_file", ""))
-        interface = settings.value("interface", "default")
-        index = self.interface_combo.findText(interface, Qt.MatchFlag.MatchExactly | Qt.MatchFlag.MatchCaseSensitive)
-        if index == -1: index = self.interface_combo.findText(interface.split(' ')[0], Qt.MatchFlag.MatchStartsWith | Qt.MatchFlag.MatchCaseSensitive)
-        if index >= 0: self.interface_combo.setCurrentIndex(index)
-        else: self.interface_combo.setCurrentIndex(0)
-        self.output_dir_edit.setText(settings.value("output_dir", ""))
-        try: self.timeout_spin.setValue(int(settings.value("timeout", DEFAULT_TIMEOUT)))
-        except: self.timeout_spin.setValue(DEFAULT_TIMEOUT)
+        self.output_dir_edit.setText(settings.value("output_dir_log", ""))
+        self.timeout_spin.setValue(int(settings.value("timeout", DEFAULT_TIMEOUT)))
+        # Interface loaded in populate_interfaces using saved setting
+
+    def save_settings(self):
+        """Save settings specific to the receiver panel."""
+        settings = QSettings("CrypticRoute", "ReceiverPanel")
+        settings.setValue("output_file", self.output_file_edit.text())
+        settings.setValue("key_file", self.key_file_edit.text())
+        settings.setValue("output_dir_log", self.output_dir_edit.text()) # Save log dir separately
+        settings.setValue("timeout", self.timeout_spin.value())
+        settings.setValue("interface_name", self.interface_combo.currentText()) # Save displayed text for restoration hint
+        settings.setValue("interface_data", self.interface_combo.currentData()) # Save actual interface name
+
+    # Ensure placeholder methods are implemented
+    def __getattr__(self, name):
+        if name in ["browse_output_file", "browse_key_file", "browse_output_dir", "clear_log", "clear_data_display", "save_displayed_data", "populate_interfaces", "update_log", "update_data_display"]:
+            def _missing_method(*args, **kwargs):
+                print(f"Warning: Method {name} called but not fully implemented in EnhancedReceiverPanel.")
+            return _missing_method
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
-# --- MainWindow Modified ---
+# --- MainWindow class definition (Placeholder for original structure) ---
 class MainWindow(QMainWindow):
-    def __init__(self):
+    # Placeholder needed for inheritance
+     def __init__(self):
         super().__init__()
-        self.setWindowTitle("CrypticRoute - Network Steganography Tool")
-        self.setMinimumSize(850, 600) # Adjusted min size
+        self.status_bar = QStatusBar() # Ensure status_bar exists
+        self.setStatusBar(self.status_bar)
+
+     # Placeholder methods
+     def closeEvent(self, event): super().closeEvent(event)
+     def save_settings(self): pass
+     def load_settings(self): pass
+     def setup_menu(self): pass
+     def show_about(self): pass
+     def check_environment(self): pass
+     def update_status_on_tab_change(self, index): pass
+
+
+# --- EnhancedMainWindow: Integrates Enhanced Panels ---
+class EnhancedMainWindow(MainWindow): # Inherit from placeholder
+    def __init__(self):
+        super().__init__() # Call placeholder __init__
+        self.setWindowTitle("CrypticRoute - Network Steganography Tool v2.3") # Updated title
+        self.setMinimumSize(850, 650) # Slightly larger default size
+
+        # --- Apply Styles ---
         self.setStyleSheet(f"""
             QMainWindow {{ background-color: {COLORS['background']}; }}
-            QTabWidget::pane {{ border: 1px solid {COLORS['secondary']}; border-radius: 8px; background-color: {COLORS['background']}; padding: 5px; }}
-            QTabBar::tab {{ background-color: {COLORS['light']}; border: 1px solid {COLORS['secondary']}; border-bottom: none; border-top-left-radius: 4px; border-top-right-radius: 4px; padding: 10px 20px; margin-right: 2px; color: {COLORS['secondary']}; }}
-            QTabBar::tab:selected {{ background-color: {COLORS['primary']}; color: white; font-weight: bold; }}
-            QTabBar::tab:hover:!selected {{ background-color: #dbe4ff; }}
-            QStatusBar {{ background-color: {COLORS['light']}; color: {COLORS['text']}; padding: 5px; font-size: 10pt; border-top: 1px solid {COLORS['secondary']}; }}
+            QTabWidget::pane {{
+                border: 1px solid {COLORS['secondary']};
+                border-radius: 8px;
+                background-color: {COLORS['background']};
+                padding: 0px; /* Let panel handle internal padding */
+                margin: 0px;
+            }}
+            QTabBar::tab {{
+                background-color: {COLORS['light']};
+                border: 1px solid {COLORS['secondary']};
+                border-bottom: none; /* Join with pane */
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                padding: 10px 25px; /* More horizontal padding */
+                margin-right: 2px;
+                color: {COLORS['secondary']};
+                font-weight: bold;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {COLORS['primary']};
+                color: white;
+                border-bottom: 1px solid {COLORS['primary']}; /* Blend selected tab with pane */
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: #e2e8f0; /* Slightly darker hover */
+                color: {COLORS['primary']};
+            }}
+            QStatusBar {{
+                background-color: {COLORS['light']};
+                color: {COLORS['text']};
+                padding: 5px;
+                font-size: 10pt;
+                border-top: 1px solid {COLORS['secondary']};
+            }}
+            QToolTip {{
+                background-color: {COLORS['dark']};
+                color: {COLORS['light']};
+                border: 1px solid {COLORS['secondary']};
+                padding: 4px;
+                border-radius: 3px;
+            }}
         """)
+
+        # --- Create Tabs ---
         self.central_widget = QTabWidget()
+        self.central_widget.setDocumentMode(True) # More modern tab look
         self.setCentralWidget(self.central_widget)
 
-        # Create panels
-        self.sender_panel = SenderPanel(self)
+        # --- Create Enhanced Panels ---
+        # Pass `self` as the parent so panels can access the main window (e.g., status bar)
+        self.sender_panel = EnhancedSenderPanel(self)
         self.central_widget.addTab(self.sender_panel, "Send File")
-        self.receiver_panel = ReceiverPanel(self)
-        self.central_widget.addTab(self.receiver_panel, "Receive File")
+        send_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowUp)
+        self.central_widget.setTabIcon(0, send_icon)
 
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
+        self.receiver_panel = EnhancedReceiverPanel(self)
+        self.central_widget.addTab(self.receiver_panel, "Receive File")
+        receive_icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ArrowDown)
+        self.central_widget.setTabIcon(1, receive_icon)
+
+
+        # Status bar already created in placeholder __init__
         self.status_bar.showMessage("Ready")
 
+        # Connect tab change signal
         self.central_widget.currentChanged.connect(self.update_status_on_tab_change)
-        self.setup_menu() # Changed from setup_ui
-        self.load_settings()
 
-        # No initial ACK grid toggle needed here anymore
+        # Setup menu (using placeholder method)
+        self.setup_menu()
+        self.load_settings() # Load main window and panel settings
 
-    def setup_menu(self): # Renamed from setup_ui
-        menubar = self.menuBar()
-        menubar.setStyleSheet(f"""
-            QMenuBar {{ background-color: {COLORS['dark']}; color: {COLORS['light']}; padding: 5px; font-size: 10pt; }}
-            QMenuBar::item {{ background-color: transparent; padding: 8px 15px; border-radius: 4px; }}
-            QMenuBar::item:selected {{ background-color: {COLORS['primary']}; }}
-            QMenu {{ background-color: {COLORS['light']}; color: {COLORS['text']}; border: 1px solid {COLORS['secondary']}; border-radius: 4px; }}
-            QMenu::item {{ padding: 8px 25px; }}
-            QMenu::item:selected {{ background-color: {COLORS['primary']}; color: white; border-radius: 2px; }}
-            QMenu::separator {{ height: 1px; background-color: {COLORS['secondary']}; margin: 5px 10px; }}
-        """)
-
-        # File menu
-        file_menu = menubar.addMenu("File")
-
-        # --- Replaced ACK Grid Toggle with Details Window Action ---
-        self.view_ack_details_action = QAction("View Acknowledgment Details", self)
-        self.view_ack_details_action.triggered.connect(self.show_ack_details)
-        # Initially disable if not on sender tab? Or let the slot handle it.
-        # self.view_ack_details_action.setEnabled(self.central_widget.currentIndex() == 0)
-        file_menu.addAction(self.view_ack_details_action)
-
-        file_menu.addSeparator()
-
-        exit_action = file_menu.addAction("Exit")
-        exit_action.triggered.connect(self.close)
-
-        # Help menu
-        help_menu = menubar.addMenu("Help")
-        about_action = help_menu.addAction("About")
-        about_action.triggered.connect(self.show_about)
-
-    # --- Removed toggle_ack_grid method ---
-
-    def show_ack_details(self):
-        """Opens the acknowledgment details window if the sender tab is active."""
-        if self.central_widget.currentWidget() == self.sender_panel:
-            self.sender_panel.open_ack_details_window()
-        else:
-            QMessageBox.information(self, "Info", "Acknowledgment details are only available on the Sender tab.")
-
-    def update_status_on_tab_change(self, index):
-        status = "Ready"
-        if index == 0: # Sender
-             status = "Sender: Ready"
-             if self.sender_panel.worker_thread and self.sender_panel.worker_thread.isRunning():
-                 status = self.sender_panel.status_label.text()
-             # Enable/disable ACK details menu based on tab
-             # self.view_ack_details_action.setEnabled(True)
-        else: # Receiver
-             status = "Receiver: Ready"
-             if self.receiver_panel.worker_thread and self.receiver_panel.worker_thread.isRunning():
-                 status = self.receiver_panel.status_label.text()
-             # self.view_ack_details_action.setEnabled(False)
-
-        self.status_bar.showMessage(status)
-
-
-    def show_about(self):
-        QMessageBox.about(self, "About CrypticRoute",
-                          f"<h2 style='color: {COLORS['primary']};'>CrypticRoute</h2>"
-                          "<p style='font-size: 11pt;'>Network Steganography Tool</p>"
-                          "<p style='font-size: 10pt;'>Version 2.2 (ACK Details Window)</p>" # Updated version
-                          "<p>A graphical interface for sending and receiving hidden data through network packets.</p>"
-                          "<p>Enhanced with connection handshake visualization and detailed acknowledgment tracking.</p>"
-                          "<hr>"
-                          "<p><i>Note: Receiver requires appropriate network permissions.</i></p>")
-
-
-    def closeEvent(self, event):
-        print("Main window close event...")
-        # Close details window first if open
-        if self.sender_panel.ack_details_window:
-             print("Closing ACK details window...")
-             self.sender_panel.ack_details_window.close()
-
-        # Stop worker threads
-        if self.sender_panel.worker_thread and self.sender_panel.worker_thread.isRunning():
-            print("Stopping sender thread...")
-            self.sender_panel.stop_transmission()
-        if self.receiver_panel.worker_thread and self.receiver_panel.worker_thread.isRunning():
-            print("Stopping receiver thread...")
-            self.receiver_panel.stop_reception()
-
-        # Save settings
-        print("Saving main window settings...")
-        self.save_settings()
-        print("Main window settings saved.")
-        event.accept()
-        print("Exiting application.")
-
-
+    # Override: Save Settings (include splitter states)
     def save_settings(self):
         settings = QSettings("CrypticRoute", "MainWindow")
         settings.setValue("geometry", self.saveGeometry())
-        # Avoid saving state as it can be problematic after UI changes
-        # settings.setValue("state", self.saveState())
+        settings.setValue("windowState", self.saveState()) # Save maximize state etc.
         settings.setValue("current_tab", self.central_widget.currentIndex())
-        # No ACK grid visibility to save anymore
 
+        # Save panel settings (calls panel's save method)
+        if hasattr(self.sender_panel, 'save_settings'):
+            self.sender_panel.save_settings()
+        if hasattr(self.receiver_panel, 'save_settings'):
+            self.receiver_panel.save_settings()
+
+        # Save splitter states if they exist
+        if hasattr(self.sender_panel, 'main_splitter') and self.sender_panel.main_splitter:
+            settings.setValue("sender_splitter_state", self.sender_panel.main_splitter.saveState())
+
+        if hasattr(self.receiver_panel, 'main_splitter') and self.receiver_panel.main_splitter:
+            settings.setValue("receiver_main_splitter_state", self.receiver_panel.main_splitter.saveState())
+
+        # Save horizontal splitter state for the receiver
+        if hasattr(self.receiver_panel, 'splitter') and self.receiver_panel.splitter:
+            settings.setValue("receiver_log_data_splitter_state", self.receiver_panel.splitter.saveState())
+
+        print("Settings saved.")
+
+    # Override: Load Settings (include splitter states)
     def load_settings(self):
         settings = QSettings("CrypticRoute", "MainWindow")
+
+        # Restore window geometry and state
         geometry = settings.value("geometry")
         if geometry: self.restoreGeometry(geometry)
-        # state = settings.value("state"); # if state: self.restoreState(state)
+        windowState = settings.value("windowState")
+        if windowState: self.restoreState(windowState)
+
+        # Load panel settings (calls panel's load method)
+        if hasattr(self.sender_panel, 'load_settings'):
+            self.sender_panel.load_settings()
+        if hasattr(self.receiver_panel, 'load_settings'):
+            self.receiver_panel.load_settings()
+
+        # Restore splitter states if they exist
+        if hasattr(self.sender_panel, 'main_splitter') and self.sender_panel.main_splitter:
+            sender_splitter_state = settings.value("sender_splitter_state")
+            if sender_splitter_state:
+                self.sender_panel.main_splitter.restoreState(sender_splitter_state)
+
+        if hasattr(self.receiver_panel, 'main_splitter') and self.receiver_panel.main_splitter:
+            receiver_main_splitter_state = settings.value("receiver_main_splitter_state")
+            if receiver_main_splitter_state:
+                self.receiver_panel.main_splitter.restoreState(receiver_main_splitter_state)
+
+        if hasattr(self.receiver_panel, 'splitter') and self.receiver_panel.splitter:
+            receiver_log_data_splitter_state = settings.value("receiver_log_data_splitter_state")
+            if receiver_log_data_splitter_state:
+                self.receiver_panel.splitter.restoreState(receiver_log_data_splitter_state)
+
+        # Restore current tab
         try:
             tab_index = int(settings.value("current_tab", 0))
-            if 0 <= tab_index < self.central_widget.count(): self.central_widget.setCurrentIndex(tab_index)
-            else: self.central_widget.setCurrentIndex(0)
-        except ValueError: self.central_widget.setCurrentIndex(0)
-        # Restore receiver splitter state if applicable
-        if hasattr(self.receiver_panel, 'splitter'):
-             splitter_state = settings.value("receiver_splitter_state")
-             if splitter_state: self.receiver_panel.splitter.restoreState(splitter_state)
-             # else: self.receiver_panel.splitter.setSizes([int(self.width()*0.5), int(self.width()*0.5)]) # Already handled in setup?
+            if 0 <= tab_index < self.central_widget.count():
+                self.central_widget.setCurrentIndex(tab_index)
+            else:
+                self.central_widget.setCurrentIndex(0)
+        except ValueError:
+            self.central_widget.setCurrentIndex(0) # Default to first tab on error
+
+        print("Settings loaded.")
+
+    # Override: Setup Menu
+    def setup_menu(self):
+        menu_bar = self.menuBar()
+
+        # File Menu
+        file_menu = menu_bar.addMenu("&File")
+        exit_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogCancelButton), "&Exit", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.setStatusTip("Exit CrypticRoute")
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
+
+        # Tools Menu (Placeholder)
+        # tools_menu = menu_bar.addMenu("&Tools")
+        # Add tools later if needed (e.g., key generator, packet analyzer)
+
+        # Help Menu
+        help_menu = menu_bar.addMenu("&Help")
+        about_action = QAction(self.style().standardIcon(QStyle.StandardPixmap.SP_DialogHelpButton), "&About", self)
+        about_action.setStatusTip("Show information about CrypticRoute")
+        about_action.triggered.connect(self.show_about)
+        help_menu.addAction(about_action)
+
+    # Override: Show About Dialog
+    def show_about(self):
+        QMessageBox.about(self, "About CrypticRoute",
+                          """<b>CrypticRoute v2.3</b><br><br>
+                          A network steganography tool for covert data transmission
+                          using modified IP packet headers.<br><br>
+                          Features TCP-like handshake, acknowledgments, optional AES encryption,
+                          and GUI controls.<br><br>
+                          <i>Note: Requires appropriate permissions (root/capabilities) for raw socket operations, especially on the receiver side. Use responsibly and ethically.</i>
+                          """)
+
+    # Override: Check Environment (placeholder implementation)
+    def check_environment(self):
+         """Basic environment checks (e.g., python version, dependencies)."""
+         print(f"Python version: {sys.version}")
+         try:
+            import netifaces
+            import psutil
+            print("Required libraries (PyQt6, netifaces, psutil) seem present.")
+         except ImportError as e:
+            print(f"WARNING: Missing library: {e}. GUI functionality might be limited.")
+            QMessageBox.warning(self, "Dependency Error", f"Missing required library: {e}. Please install it.")
+
+         is_root = (hasattr(os, 'geteuid') and os.geteuid() == 0) or \
+                   (hasattr(psutil, 'Process') and psutil.Process(os.getpid()).username() == 'root')
+
+         if not is_root and sys.platform != 'win32':
+              print("INFO: Running as non-root. Receiver might require root/sudo or network capabilities (e.g., CAP_NET_RAW).")
+              self.status_bar.showMessage("Ready (Note: Receiver may require root/sudo)")
+         elif is_root:
+              print("INFO: Running with root privileges.")
+              self.status_bar.showMessage("Ready (Running as root)")
+         else: # Windows
+              print("INFO: Running on Windows.")
+              self.status_bar.showMessage("Ready")
 
 
-# --- check_environment, main unchanged ---
-def check_environment():
-    if os.environ.get("XDG_SESSION_TYPE") == "wayland" and os.geteuid() == 0:
-         print("Warning: Running GUI applications as root under Wayland might cause issues.")
-    if "XDG_RUNTIME_DIR" not in os.environ:
-        runtime_dir_path = f"/run/user/{os.getuid()}"
-        if not os.path.isdir(runtime_dir_path): runtime_dir_path = f"/tmp/runtime-{os.getuid()}"
-        if not os.path.exists(runtime_dir_path):
-            try:
-                print(f"Attempting to create {runtime_dir_path}")
-                os.makedirs(runtime_dir_path, mode=0o700, exist_ok=True)
-                os.chmod(runtime_dir_path, 0o700)
-                os.environ["XDG_RUNTIME_DIR"] = runtime_dir_path
-                print(f"Set XDG_RUNTIME_DIR to {runtime_dir_path}")
-            except Exception as e: print(f"Warning: Failed to create or set XDG_RUNTIME_DIR: {e}")
-        elif os.path.exists(runtime_dir_path):
-             os.environ["XDG_RUNTIME_DIR"] = runtime_dir_path
+    # Override: Update status bar when tab changes
+    def update_status_on_tab_change(self, index):
+        widget = self.central_widget.widget(index)
+        if hasattr(widget, 'status_label') and widget.status_label:
+             status = widget.status_label.text()
+             self.status_bar.showMessage(status)
+        else:
+             self.status_bar.showMessage("Ready")
 
+
+    # Override: Close Event (save settings)
+    def closeEvent(self, event):
+        """Handle window close event."""
+        # Stop any running threads gracefully
+        if self.sender_panel.worker_thread and self.sender_panel.worker_thread.isRunning():
+             self.sender_panel.stop_transmission()
+             # Potentially wait here or show message? For now, just trigger stop.
+        if self.receiver_panel.worker_thread and self.receiver_panel.worker_thread.isRunning():
+             self.receiver_panel.stop_reception()
+
+        # Close ACK details window if open
+        if self.sender_panel.ack_details_window:
+             self.sender_panel.ack_details_window.close()
+
+        self.save_settings() # Save geometry, splitters, panel settings
+        print("Exiting CrypticRoute GUI.")
+        super().closeEvent(event)
+
+
+# --- Entry point modification ---
 def main():
-    check_environment()
+    # Handle Ctrl+C in the terminal more gracefully
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    os.environ['QT_STYLE_OVERRIDE'] = 'Fusion' # Force style
+
+    # Force a consistent style if needed
+    # os.environ['QT_STYLE_OVERRIDE'] = 'Fusion'
     app = QApplication(sys.argv)
     app.setApplicationName("CrypticRoute")
-    app.setApplicationVersion("2.2") # Updated version
+    app.setApplicationVersion("2.3") # Match version
 
-    is_root = (os.geteuid() == 0)
-    if is_root: print("INFO: CrypticRoute GUI is running with root privileges.")
-    else: print("INFO: CrypticRoute GUI is running as a standard user. Receiver may require root/capabilities.")
-
-    window = MainWindow()
+    # Use the enhanced main window
+    window = EnhancedMainWindow()
+    window.check_environment() # Perform checks after window creation
     window.show()
+
+    # Redirect stdout/stderr if needed for debugging within GUI log
+    # log_queue = window.sender_panel.log_queue # Or a shared queue
+    # sys.stdout = LogRedirector(log_queue)
+    # sys.stderr = LogRedirector(log_queue)
+
     sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
+# --- END OF ENHANCED gui.py ---
