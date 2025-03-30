@@ -177,3 +177,14 @@ Example (`stealth_output/sender_session_YYYYMMDD_HHMMSS/`):
 A similar structure is created by the receiver, logging received chunks, sent ACKs, reassembly info, checksum verification, and various stages of data processing.
 
 A symlink `stealth_output/sender_latest` (and `receiver_latest`) points to the most recent session directory.
+
+
+## Installation
+
+### Arch Linux / Manjaro
+
+If running on Arch Linux or a derivative and encountering issues when running with `sudo` due to missing libraries in the root environment (e.g., `externally-managed-environment` error with pip), install the dependencies system-wide using pacman:
+
+```bash
+sudo pacman -S --noconfirm python-pyqt6 python-psutil python-netifaces python-cryptography python-scapy
+```
