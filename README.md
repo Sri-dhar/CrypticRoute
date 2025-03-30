@@ -86,3 +86,52 @@ CrypticRoute GUI provides a user-friendly interface for the sender and receiver 
 - This tool is designed for educational and legitimate purposes only
 - Always obtain proper authorization before using steganography on networks you don't own
 - Data is not completely invisible and can be detected by specialized network monitoring tools
+
+```
+CrypticRoute
+├─ README.md
+├─ SessionInfo
+├─ TestConfigs
+│  ├─ createTest.sh
+│  ├─ input_1.txt
+│  ├─ input_10.txt
+│  ├─ input_2.txt
+│  ├─ input_3.txt
+│  ├─ input_4.txt
+│  ├─ input_5.txt
+│  ├─ input_6.txt
+│  ├─ input_7.txt
+│  ├─ input_8.txt
+│  ├─ input_9.txt
+│  ├─ key_1.txt
+│  ├─ key_2.txt
+│  ├─ key_3.txt
+│  ├─ key_4.txt
+│  ├─ key_5.txt
+│  └─ received.txt
+├─ backup
+│  ├─ backup_folder_nonPayload
+│  │  ├─ receiver.py
+│  │  └─ sender.py
+│  ├─ backup_folder_nonPayload_v2
+│  │  ├─ input.txt
+│  │  ├─ key.txt
+│  │  ├─ receiver.py
+│  │  └─ sender.py
+│  └─ backup_payload
+│     ├─ input.txt
+│     ├─ key.txt
+│     ├─ receiver.py
+│     └─ sender.py
+├─ v2
+│  ├─ gui.py
+│  ├─ receiver.py
+│  └─ sender.py
+└─ v3_Broadcast
+   ├─ gui.py
+   ├─ output.txt
+   ├─ receiver.py
+   ├─ sender.py
+   └─ shared_key.txt
+
+```
