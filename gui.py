@@ -13,6 +13,7 @@ import threading
 import json
 import queue
 import signal
+from PyQt6.QtCore import QEvent
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout,
 							QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton,
 							QSpinBox, QDoubleSpinBox, QTextEdit, QFileDialog, QComboBox,
@@ -1270,6 +1271,37 @@ class SenderPanel(QWidget):
 			# If we can't get IP info, just skip it
 			pass
 
+	def eventFilter(self, obj, event):
+		# Handle resize events for the log edit
+		if obj.objectName() == "logContainer" or \
+		(hasattr(obj, 'text') and obj.text() == "⣿") or \
+		obj == self.log_edit:
+			
+			if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+				# Start resize operation
+				self.resizing = True
+				self.resize_start_y = event.globalPosition().y()
+				self.resize_start_height = self.log_edit.height()
+				return True
+				
+			elif event.type() == QEvent.Type.MouseMove and self.resizing:
+				# Calculate new height based on mouse movement
+				delta_y = event.globalPosition().y() - self.resize_start_y
+				new_height = max(100, self.resize_start_height + delta_y)  # Enforce minimum height
+				
+				# Apply the new height
+				self.log_edit.setMinimumHeight(int(new_height))
+				self.log_edit.setMaximumHeight(int(new_height))
+				return True
+				
+			elif event.type() == QEvent.Type.MouseButtonRelease:
+				# End resize operation
+				self.resizing = False
+				return True
+		
+		# Pass event to parent class if not handled
+		return super().eventFilter(obj, event)
+
 	def setup_ui(self):
 		# Create a scroll area to make the UI scrollable
 		scroll_area = QScrollArea()
@@ -1302,6 +1334,12 @@ class SenderPanel(QWidget):
 				border: 2px solid {COLORS['primary']};
 			}}
 		""")
+
+		# Create a widget to hold all upper elements
+		upper_widget = QWidget()
+		upper_layout = QVBoxLayout(upper_widget)
+		upper_layout.setContentsMargins(0, 0, 0, 0)
+		upper_layout.setSpacing(10)
 
 		# Transmission Settings Group
 		form_group = ModernGroupBox("Transmission Settings")
@@ -1395,7 +1433,7 @@ class SenderPanel(QWidget):
 		form_layout.addRow("Chunk Size:", self.chunk_size_spin)
 
 		form_group.setLayout(form_layout)
-		main_layout.addWidget(form_group)
+		upper_layout.addWidget(form_group)
 
 		# Control buttons
 		control_layout = QHBoxLayout()
@@ -1417,15 +1455,15 @@ class SenderPanel(QWidget):
 		control_layout.addWidget(self.clear_button)
 		control_layout.addWidget(self.ack_status_button) # Add the new button
 		control_layout.addStretch()
-		main_layout.addLayout(control_layout)
+		upper_layout.addLayout(control_layout)
 
 		# Simplified Connection Status
 		self.handshake_indicator = HandshakeIndicator()
-		main_layout.addWidget(self.handshake_indicator)
+		upper_layout.addWidget(self.handshake_indicator)
 		
 		# Add IP Exchange Panel (new)
 		self.ip_exchange_panel = IPExchangePanel()
-		main_layout.addWidget(self.ip_exchange_panel)
+		upper_layout.addWidget(self.ip_exchange_panel)
 
 		# Progress bar
 		progress_group = ModernGroupBox("Progress")
@@ -1437,7 +1475,7 @@ class SenderPanel(QWidget):
 		progress_layout.addWidget(self.progress_bar)
 		progress_layout.addWidget(self.status_label)
 		progress_group.setLayout(progress_layout)
-		main_layout.addWidget(progress_group)
+		upper_layout.addWidget(progress_group)
 
 		# Log area
 		log_group = ModernGroupBox("Transmission Log")
@@ -1453,9 +1491,31 @@ class SenderPanel(QWidget):
 				padding: 5px;
 			}}
 		""")
+		# Set minimum height for log edit to look good when splitter is moved
+		self.log_edit.setMinimumHeight(300)
 		log_layout.addWidget(self.log_edit)
 		log_group.setLayout(log_layout)
-		main_layout.addWidget(log_group, 1) # Give log area stretch factor
+		
+		# Create a vertical splitter to allow resizing between top elements and log
+		splitter = QSplitter(Qt.Orientation.Vertical)
+		splitter.addWidget(upper_widget)
+		splitter.addWidget(log_group)
+		# Set initial sizes - adjust these values to your preference
+		splitter.setSizes([300, 1700])
+		# Make splitter handle more visible
+		splitter.setHandleWidth(8)
+		splitter.setStyleSheet(f"""
+			QSplitter::handle {{
+				background-color: {COLORS['secondary']};
+				border-radius: 2px;
+			}}
+			QSplitter::handle:hover {{
+				background-color: {COLORS['primary']};
+			}}
+		""")
+		
+		# Add the splitter to the main layout
+		main_layout.addWidget(splitter)
 
 		# Set the container as the scroll area's widget
 		scroll_area.setWidget(container_widget)
@@ -1998,6 +2058,7 @@ class ReceiverPanel(QWidget):
 		self.log_edit = QTextEdit()
 		self.log_edit.setReadOnly(True)
 		self.log_edit.setFont(QFont("Courier", 9))
+		self.log_edit.setMinimumHeight(400) 
 		self.log_edit.setStyleSheet(f"""
 			QTextEdit {{
 				background-color: {COLORS['dark']};
@@ -2016,6 +2077,7 @@ class ReceiverPanel(QWidget):
 		self.data_display.setReadOnly(True)
 		self.data_display.setFont(QFont("Courier", 9))
 		self.data_display.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap) # Prevent wrapping for better readability
+		self.data_display.setMinimumHeight(400)
 		self.data_display.setStyleSheet(f"""
 			QTextEdit {{
 				background-color: {COLORS['dark']};
@@ -2050,6 +2112,7 @@ class ReceiverPanel(QWidget):
 		panel_layout.addWidget(scroll_area)
 		self.setLayout(panel_layout)
 
+ 
 	def populate_interfaces(self):
 		self.interface_combo.clear()
 		self.interface_combo.addItem("default")
