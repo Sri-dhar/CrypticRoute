@@ -23,7 +23,6 @@ from PyQt6.QtCore import (QThread, pyqtSignal, Qt, QTimer, QSettings, QPropertyA
 						  QEasingCurve, QSize)
 from PyQt6.QtGui import QIcon, QTextCursor, QFont, QPixmap, QColor, QPalette
 import subprocess
-import psutil
 import netifaces
 import signal
 import re
