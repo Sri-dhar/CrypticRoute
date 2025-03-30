@@ -14,9 +14,9 @@ import threading
 import json
 import datetime
 import random
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.backends import default_backend
-from scapy.all import IP, TCP, sniff, conf, send
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes # type: ignore
+from cryptography.hazmat.backends import default_backend # type: ignore
+from scapy.all import IP, TCP, sniff, conf, send # type: ignore
 
 # Configure Scapy settings
 conf.verb = 0
