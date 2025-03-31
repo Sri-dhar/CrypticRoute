@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from GUI.main import main
+    from gui.main import main
     main()
 except ImportError as e:
     print(f"Error: {e}")
