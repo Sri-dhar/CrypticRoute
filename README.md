@@ -1,7 +1,6 @@
 # CrypticRoute v3 (GUI v2.1) - Network Steganography Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.x-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) <!-- Assuming MIT, adjust if different -->
 <!-- Add other badges if applicable, e.g., build status -->
 
 **CrypticRoute is a network steganography tool designed to transmit data covertly by embedding it within crafted TCP packets. This version introduces a key-based broadcast discovery mechanism for automatic peer finding on a LAN and a comprehensive Graphical User Interface (GUI) for ease of use and visualization.**
@@ -267,10 +266,3 @@ Example structure (`stealth_output/sender_session_YYYYMMDD_HHMMSS/`):
 
 Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or improvements.
 
-*(Optional: Add more specific contribution guidelines if desired)*
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-*(Create a LICENSE file with the MIT License text if you haven't already)*
