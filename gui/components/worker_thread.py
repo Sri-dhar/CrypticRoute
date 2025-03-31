@@ -44,13 +44,19 @@ class WorkerThread(QThread):
         interface = self.args.get("interface")
         output_dir = self.args.get("output_dir")
 
-        # Build command with proper arguments (no more --target)
-        cmd = ["python3", "sender.py", "--input", input_file, "--key", key_file]
+        # Build command for the new crypticroute_cli.py sender mode
+        cmd = ["python3", "crypticroute_cli.py", "sender", "--input", input_file, "--key", key_file]
         if interface:
             cmd.extend(["--interface", interface])
         if output_dir:
+            # Note: cli.py sender uses -o for output-dir, but the GUI uses -o for the file in receiver.
+            # We stick to --output-dir for sender command consistency here.
             cmd.extend(["--output-dir", output_dir])
         cmd.extend(["--delay", str(delay), "--chunk-size", str(chunk_size)])
+        # Add other sender-specific args if they were added to the GUI panel later
+        # e.g., cmd.extend(["--ack-timeout", str(ack_timeout_value)])
+        # e.g., cmd.extend(["--max-retries", str(max_retries_value)])
+        # e.g., cmd.extend(["--discovery-timeout", str(discovery_timeout_value)])
 
         self.status_signal.emit(f"Starting sender with command: {' '.join(cmd)}")
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -200,16 +206,20 @@ class WorkerThread(QThread):
         key_file = self.args.get("key_file")
         interface = self.args.get("interface")
         timeout = self.args.get("timeout", 120)
-        output_dir = self.args.get("output_dir")
+        output_dir = self.args.get("output_dir") # This is the session output dir
 
-        cmd = ["python3", "receiver.py", "--output", output_file]
+        # Build command for the new crypticroute_cli.py receiver mode
+        cmd = ["python3", "crypticroute_cli.py", "receiver", "--output", output_file]
         if key_file:
             cmd.extend(["--key", key_file])
         if interface and interface != "default":
             cmd.extend(["--interface", interface])
         if output_dir:
+            # Note: cli.py receiver uses -d or --output-dir for session dir
             cmd.extend(["--output-dir", output_dir])
-        cmd.extend(["--timeout", str(timeout)])
+        cmd.extend(["--timeout", str(timeout)]) # Inactivity timeout
+        # Add other receiver-specific args if they were added to the GUI panel later
+        # e.g., cmd.extend(["--discovery-timeout", str(discovery_timeout_value)])
 
         self.status_signal.emit(f"Starting receiver with command: {' '.join(cmd)}")
         self.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
