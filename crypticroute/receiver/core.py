@@ -391,20 +391,17 @@ def reassemble_data(received_chunks_dict, highest_seq_num, logs_dir, chunks_dir,
 
         # Clean padding logic (same as original)
         cleaned_chunk = chunk
-        is_last_chunk = (i == num_sorted - 1)
-        if not is_last_chunk:
-             stripped = chunk.rstrip(b'\0')
-             cleaned_chunk = stripped if stripped else b'\0'
-        else:
-             if all(b == 0 for b in chunk): cleaned_chunk = b'\0'
-             else:
-                  trailing_nulls = 0
-                  for byte in reversed(chunk):
-                      if byte == 0: trailing_nulls += 1
-                      else: break
-                  if trailing_nulls >= 3: cleaned_chunk = chunk.rstrip(b'\0')
 
+        # Always strip trailing nulls unless the chunk was *only* null bytes
+        if not all(b == 0 for b in chunk):
+            cleaned_chunk = chunk.rstrip(b'\0')
+        elif chunk: # Handle case where original chunk was b'\x00\x00...' -> keep one null
+             cleaned_chunk = b'\0'
         cleaned_chunks.append(cleaned_chunk)
+
+        # Save cleaned chunk (optional debug)
+        cleaned_file = os.path.join(cleaned_chunk_dir, f"chunk_{seq:04d}.bin")
+        with open(cleaned_file, "wb") as f: f.write(cleaned_chunk)
 
         # Save cleaned chunk
         cleaned_file = os.path.join(cleaned_chunk_dir, f"chunk_{seq:04d}.bin")
