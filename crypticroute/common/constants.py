@@ -20,7 +20,7 @@ DISCOVERY_RESPONSE_WINDOW = 0xCAFE # Note: Same as DATA_ACK in original
 # Encryption/Integrity
 AES_KEY_SIZE = 32 # Bytes (for AES-256)
 IV_SIZE = 16 # Bytes (for AES CFB)
-INTEGRITY_CHECK_SIZE = 16 # Bytes (MD5 checksum)
+INTEGRITY_CHECK_SIZE = 32 # Bytes (SHA-256 checksum)
 
 # Output directories
 DEFAULT_OUTPUT_DIR = "stealth_output"

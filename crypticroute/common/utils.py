@@ -259,7 +259,7 @@ def decrypt_data(data_with_iv, key, data_dir):
         print(f"\nDecryption error: {e}")
         return None
 
-# --- Data Handling ---
+# --- Data Handling & Integrity ---
 
 def chunk_data(data, chunk_size, logs_dir):
     """Split data into chunks of specified size."""
@@ -283,9 +283,9 @@ def chunk_data(data, chunk_size, logs_dir):
     return chunks
 
 def verify_data_integrity(data, logs_dir, data_dir):
-    """Verify and remove trailing MD5 checksum. Returns (data_without_checksum, checksum_ok)."""
+    """Verify and remove trailing SHA-256 checksum. Returns (data_without_checksum, checksum_ok)."""
     if len(data) <= INTEGRITY_CHECK_SIZE:
-        log_debug("Error: Data too short to contain integrity checksum")
+        log_debug(f"Error: Data too short ({len(data)} bytes) to contain integrity checksum ({INTEGRITY_CHECK_SIZE} bytes)")
         print("Error: Data too short to contain integrity checksum")
         return data, False # Return original data, mark as failed
 
@@ -295,18 +295,18 @@ def verify_data_integrity(data, logs_dir, data_dir):
     # Save components for debugging
     data_file = os.path.join(data_dir, "data_without_checksum.bin")
     with open(data_file, "wb") as f: f.write(file_data)
-    checksum_file = os.path.join(data_dir, "received_checksum.bin")
+    checksum_file = os.path.join(data_dir, "received_sha256_checksum.bin")
     with open(checksum_file, "wb") as f: f.write(received_checksum)
 
-    calculated_checksum = hashlib.md5(file_data).digest()
-    calc_checksum_file = os.path.join(data_dir, "calculated_checksum.bin")
+    calculated_checksum = hashlib.sha256(file_data).digest()
+    calc_checksum_file = os.path.join(data_dir, "calculated_sha256_checksum.bin")
     with open(calc_checksum_file, "wb") as f: f.write(calculated_checksum)
 
     checksum_match = (calculated_checksum == received_checksum)
 
     checksum_info = {
-        "expected_md5": calculated_checksum.hex(),
-        "received_md5": received_checksum.hex(),
+        "expected_sha256": calculated_checksum.hex(),
+        "received_sha256": received_checksum.hex(),
         "match": checksum_match
     }
     checksum_json = os.path.join(logs_dir, "checksum_verification.json")

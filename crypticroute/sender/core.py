@@ -565,13 +565,14 @@ def send_file_logic(file_path, interface, key_path, chunk_size, delay, ack_timeo
         log_debug(f"Data encrypted (IV prepended), total size: {len(encrypted_data_with_iv)} bytes")
         print(f"[ENCRYPT] Completed encryption. Result size (including IV): {len(encrypted_data_with_iv)} bytes")
 
-        file_checksum = hashlib.md5(encrypted_data_with_iv).digest()
-        log_debug(f"Generated MD5 checksum for (IV + encrypted data): {file_checksum.hex()}")
-        print(f"[CHECKSUM] Generated MD5 for transmitted payload: {file_checksum.hex()}")
+        # Append SHA-256 checksum for integrity check
+        file_checksum = hashlib.sha256(encrypted_data_with_iv).digest()
+        log_debug(f"Generated SHA-256 checksum for (IV + encrypted data): {file_checksum.hex()}")
+        print(f"[CHECKSUM] Generated SHA-256 for transmitted payload: {file_checksum.hex()}")
         payload_to_send = encrypted_data_with_iv + file_checksum
 
         # Save checksum and final payload package for debugging
-        checksum_file = os.path.join(session_paths['data_dir'], "md5_checksum.bin")
+        checksum_file = os.path.join(session_paths['data_dir'], "sha256_checksum.bin") # Updated filename
         final_package_file = os.path.join(session_paths['data_dir'], "final_data_package.bin")
         try:
             with open(checksum_file, "wb") as f: f.write(file_checksum)
