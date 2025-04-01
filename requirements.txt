@@ -3,3 +3,5 @@ psutil
 netifaces
 cryptography
 scapy
+pytest
+pytest-mock
