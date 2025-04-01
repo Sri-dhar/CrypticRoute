@@ -68,6 +68,9 @@ def parse_arguments():
                                  help='Decryption key file (REQUIRED for discovery/decryption)')
     receiver_parser.add_argument('--interface', '-i',
                                  help='Network interface to listen on (e.g., eth0). If omitted, Scapy attempts default.')
+    # Inactivity Timeout: It sets a duration in seconds for which 
+    # the receiver will wait without receiving any relevant packets
+    # from the sender after the initial discovery and connection phase has begun.
     receiver_parser.add_argument('--timeout', '-t', type=int, default=120,
                                  help='Inactivity timeout in seconds (stops listening if no packets received).')
     receiver_parser.add_argument('--output-dir', '-d', default=DEFAULT_OUTPUT_DIR,
