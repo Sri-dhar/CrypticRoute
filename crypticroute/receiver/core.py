@@ -17,7 +17,10 @@ from ..common.constants import (
     MAX_CHUNK_SIZE, DISCOVERY_PORT, DISCOVERY_PROBE_WINDOW,
     DISCOVERY_RESPONSE_WINDOW, SYN_WINDOW, SYN_ACK_WINDOW, FINAL_ACK_WINDOW,
     DATA_ACK_WINDOW, COMPLETION_WINDOW, IV_SIZE, INTEGRITY_CHECK_SIZE,
-    RAW_CHUNKS_SUBDIR, CLEANED_CHUNKS_SUBDIR, DATA_SUBDIR # Ensure DATA_SUBDIR is imported
+    RAW_CHUNKS_SUBDIR, CLEANED_CHUNKS_SUBDIR, DATA_SUBDIR, # Ensure DATA_SUBDIR is imported
+    RECEIVER_SPORT_RANGE, DISCOVERY_RESPONSE_SEND_COUNT, DISCOVERY_RESPONSE_SEND_DELAY,
+    DATA_ACK_SEND_COUNT, DATA_ACK_SEND_DELAY, SYN_ACK_SEND_COUNT, SYN_ACK_SEND_DELAY,
+    RECEIVER_STATUS_PRINT_INTERVAL, ACK_POLL_INTERVAL # Added ACK_POLL_INTERVAL for monitor
 )
 
 # Configure Scapy settings
@@ -36,7 +39,7 @@ class SteganographyReceiver:
         self.receiver_key_hash_probe_expected = key_probe_id_expected
         self.receiver_key_hash_response = key_response_id
         self.session_paths = session_paths
-        self.my_port = random.randint(10000, 60000) # Port for sending ACKs/SYN-ACKs
+        self.my_port = random.randint(*RECEIVER_SPORT_RANGE) # Port for sending ACKs/SYN-ACKs
 
         # State variables
         self.discovery_sender_ip = None
@@ -125,9 +128,9 @@ class SteganographyReceiver:
             log_debug(f"Sending Discovery Response to {probe_packet[IP].src}:{probe_packet[TCP].sport}")
             print(f"[DISCOVERY] Sending response to sender at {probe_packet[IP].src}")
             print(f"[IP_EXCHANGE] Sending confirmation to {probe_packet[IP].src}:{probe_packet[TCP].sport}")
-            for _ in range(5): # Send multiple times
+            for _ in range(DISCOVERY_RESPONSE_SEND_COUNT): # Send multiple times
                  send(response_pkt)
-                 time.sleep(0.1)
+                 time.sleep(DISCOVERY_RESPONSE_SEND_DELAY)
 
     def process_discovery_probe(self, packet):
         """Process incoming packets during discovery phase. Returns True if valid probe processed."""
@@ -187,9 +190,9 @@ class SteganographyReceiver:
         # print(f"[ACK] Sending acknowledgment for chunk {seq_num}") # Can be noisy
         self._log_sent_ack(seq_num) # Log the ACK we are sending
 
-        for _ in range(3): # Send multiple times
+        for _ in range(DATA_ACK_SEND_COUNT): # Send multiple times
             send(ack_packet)
-            time.sleep(0.05)
+            time.sleep(DATA_ACK_SEND_DELAY)
         self.ack_sent_chunks.add(seq_num) # Mark as sent
 
     def _create_syn_ack_packet(self, incoming_syn_packet):
@@ -217,9 +220,9 @@ class SteganographyReceiver:
 
         log_debug(f"Sending SYN-ACK for connection establishment to {self.sender_ip}:{self.sender_port}")
         print(f"[HANDSHAKE] Sending SYN-ACK response to {self.sender_ip}:{self.sender_port}")
-        for _ in range(5): # Send multiple times
+        for _ in range(SYN_ACK_SEND_COUNT): # Send multiple times
             send(syn_ack_packet)
-            time.sleep(0.1)
+            time.sleep(SYN_ACK_SEND_DELAY)
 
     # --- Packet Processing ---
     def process_packet(self, packet):
@@ -428,9 +431,10 @@ def monitor_transmission(stop_event, timeout, state):
             print(f"\n\n[TIMEOUT] No activity detected for {timeout} seconds. Stopping listening.")
             state['transmission_complete'] = True # Signal main sniff loop to stop
             break
-        time_to_wait = min(1.0, timeout - time_since_last)
+        # Use ACK_POLL_INTERVAL for sleep granularity, but ensure we don't overshoot timeout
+        time_to_wait = min(ACK_POLL_INTERVAL, timeout - time_since_last)
         if time_to_wait > 0: time.sleep(time_to_wait)
-        else: time.sleep(0.1)
+        else: time.sleep(ACK_POLL_INTERVAL / 2) # Small sleep if very close to timeout
     log_debug("Inactivity monitor stopped.")
 
 # --- High-Level Workflow Function ---
@@ -533,7 +537,7 @@ def receive_file_logic(output_path, key_path, interface, inactivity_timeout, dis
                  valid_packet_counter += 1 # Increment if it looks like data
 
             # Print status periodically
-            if packet_counter <= 10 or packet_counter % 50 == 0:
+            if packet_counter <= 10 or packet_counter % RECEIVER_STATUS_PRINT_INTERVAL == 0:
                  valid_ratio_str = f"{valid_packet_counter}/{packet_counter}" if packet_counter > 0 else "0/0"
                  print(f"[SCAN] Pkts: {packet_counter:06d} | Chunks Rcvd: {len(stego.received_chunks):04d} | Valid Ratio: {valid_ratio_str}", end='\r', flush=True)
 
