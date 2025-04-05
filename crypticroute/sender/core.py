@@ -14,7 +14,12 @@ from ..common.network import get_broadcast_address
 from ..common.constants import (
     MAX_CHUNK_SIZE, DISCOVERY_PORT, DISCOVERY_PROBE_WINDOW,
     DISCOVERY_RESPONSE_WINDOW, SYN_WINDOW, SYN_ACK_WINDOW, FINAL_ACK_WINDOW,
-    DATA_ACK_WINDOW, COMPLETION_WINDOW, IV_SIZE, INTEGRITY_CHECK_SIZE
+    DATA_ACK_WINDOW, COMPLETION_WINDOW, IV_SIZE, INTEGRITY_CHECK_SIZE,
+    FINAL_ACK_RETRANSMISSIONS, FINAL_ACK_DELAY, DATA_DPORT_RANGE,
+    COMPLETION_DPORT_RANGE, ACK_POLL_INTERVAL, DISCOVERY_PROBE_INTERVAL,
+    CONNECTION_TIMEOUT, SYN_RETRANSMIT_INTERVAL_INITIAL, MAX_SYN_SENDS,
+    SYN_RETRANSMIT_INTERVAL_LATER, COMPLETION_SEND_COUNT, COMPLETION_SEND_DELAY,
+    SENDER_SPORT_RANGE
 )
 
 # Configure Scapy settings
@@ -26,7 +31,7 @@ class SteganographySender:
     def __init__(self, broadcast_ip, source_port, key_probe_id, key_response_id, session_paths, ack_timeout, max_retries):
         """Initialize the sender state."""
         self.broadcast_ip = broadcast_ip
-        self.source_port = source_port
+        self.source_port = source_port if source_port else random.randint(*SENDER_SPORT_RANGE)
         self.sender_key_hash_probe = key_probe_id
         self.sender_key_hash_response_expected = key_response_id
         self.session_paths = session_paths
@@ -253,9 +258,9 @@ class SteganographySender:
                 if ack_packet:
                     log_debug(f"Sending final ACK (ack={ack_packet[TCP].ack:#x}) to complete handshake")
                     print(f"[HANDSHAKE] Sending final ACK")
-                    for _ in range(5): # Send multiple times for reliability
+                    for _ in range(FINAL_ACK_RETRANSMISSIONS): # Send multiple times for reliability
                         send(ack_packet)
-                        time.sleep(0.1)
+                        time.sleep(FINAL_ACK_DELAY)
                     self.connection_established = True # Mark connection established *after* sending final ACK
                     print(f"[HANDSHAKE] Connection established")
                 return # Packet processed
@@ -323,7 +328,7 @@ class SteganographySender:
         elif len(data) > MAX_CHUNK_SIZE:
             data = data[:MAX_CHUNK_SIZE]
 
-        dst_port = random.randint(10000, 60000) # Use random destination port
+        dst_port = random.randint(*DATA_DPORT_RANGE) # Use random destination port
 
         # Embed data in sequence and ack numbers, seq_num in window
         tcp_packet = IP(dst=self.target_ip) / TCP(
@@ -349,7 +354,7 @@ class SteganographySender:
             return None
         tcp_packet = IP(dst=self.target_ip) / TCP(
             sport=self.source_port,
-            dport=random.randint(10000, 60000),
+            dport=random.randint(*COMPLETION_DPORT_RANGE),
             window=COMPLETION_WINDOW,
             flags="F" # FIN packet signals completion
         )
@@ -387,7 +392,7 @@ class SteganographySender:
         while self.waiting_for_ack and retransmit_count < self.max_retries:
             wait_start = time.time()
             while self.waiting_for_ack and (time.time() - wait_start) < self.ack_timeout:
-                time.sleep(0.1) # Wait for ACK
+                time.sleep(ACK_POLL_INTERVAL) # Wait for ACK
                 if not self.waiting_for_ack: break # ACK received
 
             if self.waiting_for_ack: # Timeout occurred
@@ -419,7 +424,7 @@ def discover_receiver(stego, timeout):
     start_time = time.time()
     probes_sent = 0
     last_probe_time = 0
-    probe_interval = 1.0
+    probe_interval = DISCOVERY_PROBE_INTERVAL
 
     while not stego.discovery_complete and time.time() - start_time < timeout:
         current_time = time.time()
@@ -428,7 +433,7 @@ def discover_receiver(stego, timeout):
              probes_sent += 1
              last_probe_time = current_time
              print(".", end="", flush=True)
-        time.sleep(0.1) # Avoid busy-waiting
+        time.sleep(ACK_POLL_INTERVAL) # Avoid busy-waiting
 
     # Stop the listener thread *after* the loop finishes or discovery is complete
     stego.stop_listener_threads() # Use the unified stop method
@@ -474,16 +479,20 @@ def establish_connection(stego, timeout=20):
     # Send SYN repeatedly and wait for connection_established flag (set by _process_ack_packet)
     start_time = time.time()
     syn_sends = 0
-    syn_interval = 0.5
-    max_syn_sends = 15
+    syn_interval = SYN_RETRANSMIT_INTERVAL_INITIAL
+    max_syn_sends = MAX_SYN_SENDS
+    syn_interval_switch_count = 5 # Number of sends before switching interval
 
     while not stego.connection_established and time.time() - start_time < timeout:
-        if syn_sends < max_syn_sends and (syn_sends < 5 or (time.time() - start_time) % syn_interval < 0.1):
-            log_debug(f"Sending SYN ({syn_sends+1})")
+        # Send SYN if under max sends and either in initial burst or interval has passed
+        if syn_sends < max_syn_sends and (syn_sends < syn_interval_switch_count or (time.time() - start_time) % syn_interval < ACK_POLL_INTERVAL):
+            log_debug(f"Sending SYN ({syn_sends+1}/{max_syn_sends})")
             send(syn_packet)
             syn_sends += 1
-            if syn_sends == 5: syn_interval = 1.5
-        time.sleep(0.1)
+            if syn_sends == syn_interval_switch_count:
+                syn_interval = SYN_RETRANSMIT_INTERVAL_LATER
+                log_debug(f"Switched SYN retransmit interval to {syn_interval}s")
+        time.sleep(ACK_POLL_INTERVAL)
 
     if stego.connection_established:
         log_debug("Connection established successfully (flag set by ACK listener)")
@@ -504,10 +513,11 @@ def send_file_logic(file_path, interface, key_path, chunk_size, delay, ack_timeo
     log_debug("Phase 0: Preparation")
     broadcast_ip = get_broadcast_address(interface)
     if not broadcast_ip:
-        print("Error: Could not determine broadcast IP. Exiting.")
+        print("[ERROR] Could not determine broadcast IP. Exiting.")
+        log_debug("Critical failure: Could not determine broadcast IP.")
         return False # Critical failure
 
-    log_debug(f"Using broadcast address: {broadcast_ip} (Interface: {interface or 'auto'})")
+    log_debug(f"Using broadcast address: {broadcast_ip} (Interface: {interface or 'default'})")
 
     # Prepare key and derive identifiers
     log_debug(f"Reading key from: {key_path}")
@@ -524,7 +534,7 @@ def send_file_logic(file_path, interface, key_path, chunk_size, delay, ack_timeo
     # Create sender instance
     stego = SteganographySender(
         broadcast_ip=broadcast_ip,
-        source_port=random.randint(10000, 60000),
+        source_port=random.randint(*SENDER_SPORT_RANGE), # Use range from constants
         key_probe_id=probe_id,
         key_response_id=response_id,
         session_paths=session_paths,
@@ -622,10 +632,10 @@ def send_file_logic(file_path, interface, key_path, chunk_size, delay, ack_timeo
         completion_packet = stego._create_completion_packet()
         if completion_packet:
             print("[COMPLETE] Sending transmission completion signals...")
-            for i in range(10):
-                log_debug(f"Sending completion signal {i+1}/10 to {stego.target_ip}")
+            for i in range(COMPLETION_SEND_COUNT):
+                log_debug(f"Sending completion signal {i+1}/{COMPLETION_SEND_COUNT} to {stego.target_ip}")
                 send(completion_packet)
-                time.sleep(0.2)
+                time.sleep(COMPLETION_SEND_DELAY)
         else:
             log_debug("Could not create completion packet.")
             print("[WARNING] Could not send completion signal.")
