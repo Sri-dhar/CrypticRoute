@@ -47,18 +47,30 @@ def create_timestamp_option_bytes(data_bits):
 
 def main():
     if len(sys.argv) != 3:
-        print(f"Usage: sudo {sys.argv[0]} <receiver_ip> <secret_message>")
-        # Removed the note about truncation as we now handle longer messages
+        print(f"Usage: sudo {sys.argv[0]} <receiver_ip> <input_file_path>")
+        print(f"Example: sudo {sys.argv[0]} 192.168.1.100 message.txt")
         sys.exit(1)
 
     receiver_ip = sys.argv[1]
-    secret_message = sys.argv[2]
+    input_file_path = sys.argv[2]
     dest_port = 11234 # Port used in the paper
     chunk_size = 20 # Bits per packet
     delay_between_packets = 0.1 # Seconds
 
+    # Read the secret message from the file
+    try:
+        with open(input_file_path, 'r', encoding='utf-8') as f:
+            secret_message = f.read()
+        print(f"[*] Read message from: {input_file_path}")
+    except FileNotFoundError:
+        print(f"[!] Error: Input file not found at '{input_file_path}'")
+        sys.exit(1)
+    except IOError as e:
+        print(f"[!] Error reading input file '{input_file_path}': {e}")
+        sys.exit(1)
+
     print(f"[*] Sending to {receiver_ip}:{dest_port}")
-    print(f"[*] Original message: {secret_message}")
+    # print(f"[*] Original message: {secret_message}") # Maybe too long to print
 
     # Convert the entire message to bits
     message_bits = string_to_bits(secret_message)
@@ -137,7 +149,7 @@ def main():
         print(f"[!] Error: {e}")
     except PermissionError:
         print("[!] Error: Sending packets requires root/administrator privileges.")
-        print(f"[*] Try running: sudo {sys.argv[0]} {receiver_ip} \"{secret_message}\"")
+        print(f"[*] Try running: sudo {sys.argv[0]} {receiver_ip} {input_file_path}")
     except Exception as e:
         print(f"[!] An unexpected error occurred: {e}")
         print("--- Traceback ---")
