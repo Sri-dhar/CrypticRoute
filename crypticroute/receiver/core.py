@@ -440,7 +440,8 @@ def monitor_transmission(stop_event, timeout, state):
 # --- High-Level Workflow Function ---
 def receive_file_logic(output_path, key_path, interface, inactivity_timeout, discovery_timeout, session_paths):
     """Encapsulates the main logic for discovering, receiving, and processing a file."""
-    log_debug("--- Receiver Core Logic Start ---")
+    session_start_time = time.time() # Capture overall start time
+    log_debug(f"--- Receiver Core Logic Start (Time: {session_start_time}) ---")
     overall_success = False
     status = "started"
     final_data_to_save = b''
@@ -656,7 +657,10 @@ def receive_file_logic(output_path, key_path, interface, inactivity_timeout, dis
          overall_success = False
     finally:
         # Log final stats
-        duration = time.time() - reception_state['reception_start_time'] if reception_state.get('reception_start_time', 0) > 0 else 0
+        session_end_time = time.time() # Capture end time for calculations
+        data_transmission_duration = session_end_time - reception_state['reception_start_time'] if reception_state.get('reception_start_time', 0) > 0 else 0
+        total_session_duration = session_end_time - session_start_time
+
         chunk_count = len(stego.received_chunks) if 'stego' in locals() else 0
         highest_seq = stego.highest_seq_num_seen if 'stego' in locals() else 0
         total_expected = stego.total_chunks_expected if 'stego' in locals() and stego.total_chunks_expected >= highest_seq else highest_seq
@@ -666,15 +670,19 @@ def receive_file_logic(output_path, key_path, interface, inactivity_timeout, dis
         print(f"\nReception summary:")
         print(f"- Processed {packet_counter} packets total (from sender: {stego.sender_ip if 'stego' in locals() else 'Unknown'})")
         print(f"- Identified {valid_packet_counter} valid data packets")
-        print(f"- Received {chunk_count} unique data chunks in ~{duration:.2f}s")
+        print(f"- Received {chunk_count} unique data chunks") # Removed old duration print
         print(f"- Highest sequence number seen: {highest_seq}")
         print(f"- Total chunks expected (based on MSS/highest seq): {total_expected}")
         if missing_chunks_count > 0:
             print(f"- Reception rate: {reception_rate:.1f}% ({missing_chunks_count} missing)")
+        # Print durations together
+        print(f"- Data Transmission Duration: ~{data_transmission_duration:.2f}s")
+        print(f"- Total Session Duration: ~{total_session_duration:.2f}s")
 
         # Save completion info
         completion_info = {
-            "session_end_time": time.time(),
+            "session_start_time": session_start_time, # Added
+            "session_end_time": session_end_time,
             "status": status,
             "bytes_saved": len(final_data_to_save) if overall_success or status == "failed_decryption" else 0,
             "total_packets_processed": packet_counter,
@@ -683,7 +691,8 @@ def receive_file_logic(output_path, key_path, interface, inactivity_timeout, dis
             "highest_seq_num_seen": highest_seq,
             "total_chunks_expected": total_expected,
             "missing_chunk_count": missing_chunks_count,
-            "duration_seconds": round(duration, 2),
+            "data_transmission_duration_seconds": round(data_transmission_duration, 2), # Renamed and added
+            "total_session_duration_seconds": round(total_session_duration, 2), # Added
             "sender_ip_discovered": stego.discovery_sender_ip if 'stego' in locals() else None,
             "sender_ip_connected": stego.sender_ip if 'stego' in locals() else None,
             "sender_port_connected": stego.sender_port if 'stego' in locals() else None
