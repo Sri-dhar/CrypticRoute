@@ -6,6 +6,9 @@ from scapy.all import IP, UDP, send, Raw
 import binascii
 import traceback
 
+# Define the End-of-Transmission marker (20 bits)
+EOT_MARKER = '0' * 20
+
 def bits_to_int(bits):
     """Converts a string of bits to an integer."""
     if not bits:
@@ -98,9 +101,27 @@ def main():
             packets_sent += 1
             time.sleep(delay_between_packets) # Add a small delay
 
-        print(f"\n[*] Finished sending. Total packets sent: {packets_sent}")
+        # Send the EOT marker packet
+        print(f"\n[*] Sending EOT marker: {EOT_MARKER}")
+        try:
+            raw_options_eot = create_timestamp_option_bytes(EOT_MARKER)
+            ip_layer_eot = IP(dst=receiver_ip, options=Raw(load=raw_options_eot))
+            udp_layer_eot = UDP(dport=dest_port, sport=12345)
+            payload_eot = Raw(load="EOT")
+            packet_eot = ip_layer_eot / udp_layer_eot / payload_eot
+            send(packet_eot, verbose=0)
+            print("[+] EOT marker sent successfully.")
+            packets_sent += 1
+        except Exception as e:
+            print(f"[!] Error sending EOT marker: {e}")
+            print("--- Traceback ---")
+            traceback.print_exc()
+            print("---------------")
 
-    except ValueError as e: # Catch potential errors during option creation if padding fails
+
+        print(f"\n[*] Finished sending. Total packets sent (including EOT): {packets_sent}")
+
+    except ValueError as e: # Catch potential errors during option creation
         print(f"[!] Error: {e}")
     except PermissionError:
         print("[!] Error: Sending packets requires root/administrator privileges.")
