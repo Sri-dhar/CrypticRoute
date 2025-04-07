@@ -18,7 +18,8 @@ EOT_MARKER = '0' * CHUNK_BITS
 # Global variables
 all_received_bits = ""
 packets_received = 0 # Counter for received packets
-reception_start_time = None # Time first relevant packet received
+reception_start_time = None # Time first relevant packet received (matching filter)
+first_data_packet_time = None # Time first packet with valid data bits received
 reception_end_time = None # Time EOT received or sniff stopped
 # Event to signal sniffing to stop
 sniff_stop_event = threading.Event()
@@ -52,7 +53,7 @@ def bits_to_string(bits):
 
 def packet_handler(packet):
     """Processes sniffed packets to extract covert data."""
-    global all_received_bits, sniff_stop_event, packets_received, reception_start_time, reception_end_time
+    global all_received_bits, sniff_stop_event, packets_received, reception_start_time, first_data_packet_time, reception_end_time
 
     # Check if stop event is already set (e.g., by previous EOT)
     if sniff_stop_event.is_set():
@@ -147,6 +148,10 @@ def packet_handler(packet):
 
             # Process extracted bits for this chunk if options were valid
             if options_valid:
+                # Record time of first valid data packet *before* checking EOT
+                if first_data_packet_time is None and len(current_chunk_bits) == CHUNK_BITS and '?' not in current_chunk_bits:
+                    first_data_packet_time = time.time()
+
                 if len(current_chunk_bits) == CHUNK_BITS and '?' not in current_chunk_bits:
                     # Check if the received chunk is the EOT marker
                     if current_chunk_bits == EOT_MARKER:
@@ -175,10 +180,11 @@ def packet_handler(packet):
 import time # Add time import
 
 def main():
-    global all_received_bits, packets_received, reception_start_time, reception_end_time # Ensure we clear previous runs
+    global all_received_bits, packets_received, reception_start_time, first_data_packet_time, reception_end_time # Ensure we clear previous runs
     all_received_bits = ""
     packets_received = 0
     reception_start_time = None
+    first_data_packet_time = None
     reception_end_time = None
     sniff_stop_event.clear() # Ensure event is clear at start
 
@@ -206,21 +212,34 @@ def main():
 
     # --- Sniffing finished ---
     # If sniffing stopped but EOT wasn't the reason (e.g., manual interrupt), record end time now
-    if reception_end_time is None:
+    if reception_end_time is None and reception_start_time is not None: # Avoid setting end time if no packets were ever received
         reception_end_time = time.time()
 
-    total_reception_time = 0
+    total_sniffing_duration = 0
     if reception_start_time and reception_end_time:
-        total_reception_time = reception_end_time - reception_start_time
+        total_sniffing_duration = reception_end_time - reception_start_time
+
+    data_transmission_duration = 0
+    if first_data_packet_time and reception_end_time:
+         data_transmission_duration = reception_end_time - first_data_packet_time
 
     print("\n" + "="*30)
     print("[*] Reception Summary:")
-    print(f"[*]   Total packets received (matching port/options): {packets_received}")
+    print(f"[*]   Total packets received (matching filter): {packets_received}")
     print(f"[*]   Total covert bits extracted: {len(all_received_bits)}")
-    if reception_start_time:
-        print(f"[*]   Total reception time: {total_reception_time:.4f} seconds")
+
+    # Print Data Transmission Duration
+    if first_data_packet_time:
+        print(f"[*]   Data Transmission Duration: {data_transmission_duration:.4f} seconds (First data packet to EOT/stop)")
     else:
-        print("[*]   Total reception time: N/A (No valid packets received)")
+        print("[*]   Data Transmission Duration: N/A (No valid data packets received)")
+
+    # Print Total Sniffing Duration
+    if reception_start_time:
+        print(f"[*]   Total Sniffing Duration: {total_sniffing_duration:.4f} seconds (First matching packet to EOT/stop)")
+    else:
+        print("[*]   Total Sniffing Duration: N/A (No matching packets received)")
+
     print(f"[*]   Accumulated bits: {all_received_bits}")
 
     if all_received_bits:
