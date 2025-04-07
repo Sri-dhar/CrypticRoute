@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 
 import sys
-from scapy.all import IP, UDP, send, Raw # Removed IPOption_Timestamp
+import time # Added for delay
+from scapy.all import IP, UDP, send, Raw
 import binascii
-import traceback # Add traceback import
+import traceback
 
 def bits_to_int(bits):
     """Converts a string of bits to an integer."""
@@ -44,45 +45,62 @@ def create_timestamp_option_bytes(data_bits):
 def main():
     if len(sys.argv) != 3:
         print(f"Usage: sudo {sys.argv[0]} <receiver_ip> <secret_message>")
-        print("Note: Secret message will be truncated/padded to fit 20 bits.")
+        # Removed the note about truncation as we now handle longer messages
         sys.exit(1)
 
     receiver_ip = sys.argv[1]
     secret_message = sys.argv[2]
     dest_port = 11234 # Port used in the paper
+    chunk_size = 20 # Bits per packet
+    delay_between_packets = 0.1 # Seconds
 
     print(f"[*] Sending to {receiver_ip}:{dest_port}")
     print(f"[*] Original message: {secret_message}")
 
-    # Convert message to bits and ensure it's 20 bits long
+    # Convert the entire message to bits
     message_bits = string_to_bits(secret_message)
-    if len(message_bits) > 20:
-        message_bits = message_bits[:20]
-        print("[!] Message truncated to 20 bits.")
-    elif len(message_bits) < 20:
-        padding = '0' * (20 - len(message_bits))
-        message_bits += padding
-        print("[!] Message padded to 20 bits.")
+    total_bits = len(message_bits)
+    print(f"[*] Total bits to send: {total_bits}")
 
-    print(f"[*] Sending bits: {message_bits}")
-
+    packets_sent = 0
     try:
-        # Create raw bytes for the options
-        raw_options = create_timestamp_option_bytes(message_bits)
+        for i in range(0, total_bits, chunk_size):
+            chunk = message_bits[i:i+chunk_size]
 
-        # Craft the packet: IP layer with raw options, UDP layer, optional raw payload
-        ip_layer = IP(dst=receiver_ip, options=Raw(load=raw_options))
-        udp_layer = UDP(dport=dest_port, sport=12345) # Random source port
-        # Add some dummy payload if needed, though not strictly necessary for the technique
-        payload = Raw(load="Covert Packet")
+            # Pad the last chunk if necessary
+            if len(chunk) < chunk_size:
+                padding = '0' * (chunk_size - len(chunk))
+                chunk += padding
+                print(f"[*] Padding last chunk: {padding}")
 
-        packet = ip_layer / udp_layer / payload
-        # packet.show() # Uncomment to see packet structure
+            print(f"\n[*] Preparing chunk {packets_sent + 1}: {chunk}")
 
-        send(packet, verbose=0)
-        print("[+] Packet sent successfully.")
+            # Create raw bytes for the options for this chunk
+            try:
+                 raw_options = create_timestamp_option_bytes(chunk)
+            except ValueError as e:
+                 print(f"[!] Error creating options for chunk {packets_sent + 1}: {e}")
+                 continue # Skip this chunk if options can't be made (shouldn't happen with padding)
 
-    except ValueError as e:
+
+            # Craft the packet: IP layer with raw options, UDP layer, optional raw payload
+            # Add packet sequence number in payload for potential reordering handling (optional)
+            payload_content = f"Chunk {packets_sent + 1}"
+            ip_layer = IP(dst=receiver_ip, options=Raw(load=raw_options))
+            udp_layer = UDP(dport=dest_port, sport=12345) # Random source port
+            payload = Raw(load=payload_content)
+
+            packet = ip_layer / udp_layer / payload
+            # packet.show() # Uncomment to see packet structure
+
+            send(packet, verbose=0)
+            print(f"[+] Chunk {packets_sent + 1} sent successfully.")
+            packets_sent += 1
+            time.sleep(delay_between_packets) # Add a small delay
+
+        print(f"\n[*] Finished sending. Total packets sent: {packets_sent}")
+
+    except ValueError as e: # Catch potential errors during option creation if padding fails
         print(f"[!] Error: {e}")
     except PermissionError:
         print("[!] Error: Sending packets requires root/administrator privileges.")
