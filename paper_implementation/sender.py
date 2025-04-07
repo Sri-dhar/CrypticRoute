@@ -66,8 +66,12 @@ def main():
     print(f"[*] Total bits to send: {total_bits}")
 
     packets_sent = 0
+    start_time = None # Initialize start time
     try:
         for i in range(0, total_bits, chunk_size):
+            if start_time is None: # Record time just before sending the first packet
+                start_time = time.time()
+
             chunk = message_bits[i:i+chunk_size]
 
             # Pad the last chunk if necessary
@@ -114,12 +118,20 @@ def main():
             packets_sent += 1
         except Exception as e:
             print(f"[!] Error sending EOT marker: {e}")
+        finally:
+            end_time = time.time() # Record end time
             print("--- Traceback ---")
             traceback.print_exc()
             print("---------------")
 
 
-        print(f"\n[*] Finished sending. Total packets sent (including EOT): {packets_sent}")
+        total_time = end_time - start_time
+        print("\n" + "="*30)
+        print("[*] Transmission Summary:")
+        print(f"[*]   Total bits intended: {total_bits}")
+        print(f"[*]   Total packets sent (including EOT): {packets_sent}")
+        print(f"[*]   Total transmission time: {total_time:.4f} seconds")
+        print("="*30)
 
     except ValueError as e: # Catch potential errors during option creation
         print(f"[!] Error: {e}")
