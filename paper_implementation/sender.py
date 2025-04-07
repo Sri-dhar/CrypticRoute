@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 
 import sys
-from scapy.all import IP, UDP, IPOption_Timestamp, send, Raw
+from scapy.all import IP, UDP, send, Raw # Removed IPOption_Timestamp
 import binascii
+import traceback # Add traceback import
 
 def bits_to_int(bits):
     """Converts a string of bits to an integer."""
@@ -14,35 +15,31 @@ def string_to_bits(s):
     """Converts an ASCII string to a string of bits."""
     return ''.join(format(ord(c), '08b') for c in s)
 
-def create_timestamp_options(data_bits):
-    """Creates a list of 5 IPOption_Timestamp objects with data in overflow."""
+def create_timestamp_option_bytes(data_bits):
+    """Creates raw bytes for 5 IP timestamp options with data in overflow."""
     if len(data_bits) != 20:
         raise ValueError("Data must be exactly 20 bits long for this implementation.")
 
-    options = []
+    all_option_bytes = b''
     for i in range(5):
         chunk = data_bits[i*4:(i+1)*4]
         overflow_val = bits_to_int(chunk)
+        flag_val = 0 # As per paper and implementation attempt
 
-        # Create a timestamp option
-        # Type=68 (0x44), Length=8 (minimum for flag 0), Pointer=5 (minimum)
-        # Flag=0 (timestamps only), Overflow=covert data
-        # We add a dummy timestamp value (0) as Scapy might require it for length 8.
-        # Note: The paper's approach of 5 separate options is unusual.
-        # A single option holding 5 timestamps would normally have length 24.
-        # We follow the paper's description of 5 distinct options.
-        option = IPOption_Timestamp(
-            copy_flag=0,
-            optclass=2, # Debugging and Measurement
-            option=4,   # Timestamp
-            length=8,   # Minimal length for flag=0 (includes one timestamp slot)
-            pointer=5,  # Minimal pointer value
-            overflow=overflow_val,
-            flag=0,     # Timestamps only
-            timestamps=[0] # Dummy timestamp to satisfy length 8
-        )
-        options.append(option)
-    return options
+        # Calculate the byte containing overflow (upper 4 bits) and flag (lower 4 bits)
+        overflow_flag_byte = (overflow_val << 4) | flag_val
+
+        # Construct the option bytes:
+        # Type (0x44), Length (8), Pointer (5), Overflow+Flag, Timestamp (0)
+        option_bytes = bytes([
+            0x44,  # Option Type: Timestamp
+            8,     # Option Length: Minimal for flag=0 (1 timestamp slot)
+            5,     # Pointer: Minimal value
+            overflow_flag_byte, # Combined Overflow (bits 7-4) and Flag (bits 3-0)
+            0, 0, 0, 0 # Dummy 32-bit timestamp value
+        ])
+        all_option_bytes += option_bytes
+    return all_option_bytes
 
 def main():
     if len(sys.argv) != 3:
@@ -70,10 +67,11 @@ def main():
     print(f"[*] Sending bits: {message_bits}")
 
     try:
-        timestamp_options = create_timestamp_options(message_bits)
+        # Create raw bytes for the options
+        raw_options = create_timestamp_option_bytes(message_bits)
 
-        # Craft the packet: IP layer with options, UDP layer, optional raw payload
-        ip_layer = IP(dst=receiver_ip, options=timestamp_options)
+        # Craft the packet: IP layer with raw options, UDP layer, optional raw payload
+        ip_layer = IP(dst=receiver_ip, options=Raw(load=raw_options))
         udp_layer = UDP(dport=dest_port, sport=12345) # Random source port
         # Add some dummy payload if needed, though not strictly necessary for the technique
         payload = Raw(load="Covert Packet")
@@ -91,6 +89,9 @@ def main():
         print(f"[*] Try running: sudo {sys.argv[0]} {receiver_ip} \"{secret_message}\"")
     except Exception as e:
         print(f"[!] An unexpected error occurred: {e}")
+        print("--- Traceback ---")
+        traceback.print_exc()
+        print("---------------")
 
 if __name__ == "__main__":
     main()
