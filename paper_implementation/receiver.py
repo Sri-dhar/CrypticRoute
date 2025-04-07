@@ -15,8 +15,11 @@ CHUNK_BITS = EXPECTED_OPTIONS * BITS_PER_OPTION
 # Define the End-of-Transmission marker (must match sender)
 EOT_MARKER = '0' * CHUNK_BITS
 
-# Global variable to store accumulated bits across packets
+# Global variables
 all_received_bits = ""
+packets_received = 0 # Counter for received packets
+reception_start_time = None # Time first relevant packet received
+reception_end_time = None # Time EOT received or sniff stopped
 # Event to signal sniffing to stop
 sniff_stop_event = threading.Event()
 
@@ -49,7 +52,7 @@ def bits_to_string(bits):
 
 def packet_handler(packet):
     """Processes sniffed packets to extract covert data."""
-    global all_received_bits, sniff_stop_event
+    global all_received_bits, sniff_stop_event, packets_received, reception_start_time, reception_end_time
 
     # Check if stop event is already set (e.g., by previous EOT)
     if sniff_stop_event.is_set():
@@ -61,6 +64,10 @@ def packet_handler(packet):
 
         # Check if it's the correct destination port and has IP options
         if udp_layer.dport == LISTEN_PORT and ip_layer.options:
+            if reception_start_time is None: # Record time of first valid packet
+                reception_start_time = time.time()
+
+            packets_received += 1 # Increment packet counter here
             # Optional: Log the raw payload to see chunk number
             payload_str = ""
             if packet.haslayer(Raw):
@@ -143,6 +150,7 @@ def packet_handler(packet):
                 if len(current_chunk_bits) == CHUNK_BITS and '?' not in current_chunk_bits:
                     # Check if the received chunk is the EOT marker
                     if current_chunk_bits == EOT_MARKER:
+                        reception_end_time = time.time() # Record time EOT received
                         print(f"[+] EOT marker received: {current_chunk_bits}")
                         print("[*] Stopping sniff...")
                         sniff_stop_event.set() # Signal sniff to stop
@@ -164,9 +172,14 @@ def packet_handler(packet):
             # print(".", end="", flush=True) # Reduce noise
             pass
 
+import time # Add time import
+
 def main():
-    global all_received_bits # Ensure we clear previous runs if script is re-run in same process
+    global all_received_bits, packets_received, reception_start_time, reception_end_time # Ensure we clear previous runs
     all_received_bits = ""
+    packets_received = 0
+    reception_start_time = None
+    reception_end_time = None
     sniff_stop_event.clear() # Ensure event is clear at start
 
     print(f"[*] Starting receiver...")
@@ -192,10 +205,23 @@ def main():
     # Removed finally block with timer cancellation
 
     # --- Sniffing finished ---
+    # If sniffing stopped but EOT wasn't the reason (e.g., manual interrupt), record end time now
+    if reception_end_time is None:
+        reception_end_time = time.time()
+
+    total_reception_time = 0
+    if reception_start_time and reception_end_time:
+        total_reception_time = reception_end_time - reception_start_time
+
     print("\n" + "="*30)
-    print("[*] Sniffing complete.")
-    print(f"[*] Total bits received: {len(all_received_bits)}")
-    print(f"[*] Accumulated bits: {all_received_bits}")
+    print("[*] Reception Summary:")
+    print(f"[*]   Total packets received (matching port/options): {packets_received}")
+    print(f"[*]   Total covert bits extracted: {len(all_received_bits)}")
+    if reception_start_time:
+        print(f"[*]   Total reception time: {total_reception_time:.4f} seconds")
+    else:
+        print("[*]   Total reception time: N/A (No valid packets received)")
+    print(f"[*]   Accumulated bits: {all_received_bits}")
 
     if all_received_bits:
         final_message = "[Decoding Error]" # Default in case of error
