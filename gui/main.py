@@ -14,6 +14,7 @@ from PyQt6.QtCore import QSettings, QByteArray, QTimer
 from PyQt6.QtGui import QIcon
 
 from .components.panels import SenderPanel, ReceiverPanel
+from .components.session_history_panel import SessionHistoryPanel # Import the new panel
 from .utils.constants import COLORS
 
 class MainWindow(QMainWindow):
@@ -67,6 +68,8 @@ class MainWindow(QMainWindow):
         self.central_widget.addTab(self.sender_panel, "Send File")
         self.receiver_panel = ReceiverPanel(self)
         self.central_widget.addTab(self.receiver_panel, "Receive File")
+        self.history_panel = SessionHistoryPanel(self) # Create the history panel
+        self.central_widget.addTab(self.history_panel, "Previous Sessions") # Add the history tab
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -131,14 +134,16 @@ class MainWindow(QMainWindow):
         # Use the status labels within the panels if they are more informative
         if index == 0: # Sender tab
             status = self.sender_panel.status_label.text()
-            if "Ready" in status or not self.sender_panel.worker_thread:
+            if "Ready" in status or not self.sender_panel.worker_thread or not self.sender_panel.worker_thread.isRunning():
                 self.status_bar.showMessage("Sender: Ready")
             # else keep the specific status from update_progress/update_status
-        else: # Receiver tab
+        elif index == 1: # Receiver tab
             status = self.receiver_panel.status_label.text()
-            if "Ready" in status or not self.receiver_panel.worker_thread:
+            if "Ready" in status or not self.receiver_panel.worker_thread or not self.receiver_panel.worker_thread.isRunning():
                 self.status_bar.showMessage("Receiver: Ready")
             # else keep specific status
+        elif index == 2: # History tab
+            self.status_bar.showMessage("Viewing Session History")
 
 
     def show_about(self):
