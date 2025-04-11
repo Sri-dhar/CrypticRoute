@@ -10,6 +10,7 @@ import subprocess
 import io             # For redirection
 import contextlib     # For redirection
 import traceback    # Ensure traceback is imported
+import threading    # Import threading for Event
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -32,7 +33,8 @@ class WorkerThread(QThread):
         self.operation = operation
         self.args = args
         self.process = None
-        self.stopped = False
+        self.stopped = False # Keep for sender logic compatibility? Or remove if receiver is main focus? Let's keep for now.
+        self._stop_event = threading.Event() # Event to signal receiver logic to stop
         self._receiver_total_chunks = 0 # Internal state for receiver progress
 
     def run(self):
@@ -229,9 +231,16 @@ class WorkerThread(QThread):
                     timeout=timeout,
                     discovery_timeout=self.args.get("discovery_timeout", 60), # Get discovery timeout if set
                     session_paths=session_paths,
-                    update_signal=self.file_received_signal # Pass the file received signal emitter
+                    update_signal=self.file_received_signal, # Pass the file received signal emitter
+                    stop_event=self._stop_event # Pass the stop event
                 )
-            self.finished_signal.emit(success)
+            # Check if stopped before emitting finished signal
+            if not self._stop_event.is_set():
+                self.finished_signal.emit(success)
+            else:
+                # If stopped, emit failure, but maybe a specific status?
+                self.status_signal.emit("Reception stopped by user")
+                self.finished_signal.emit(False) # Indicate it didn't complete successfully
 
         except Exception as e:
              # Handle exceptions during direct call setup or execution
@@ -249,8 +258,12 @@ class WorkerThread(QThread):
         # No return needed here as signals handle completion/failure
 
     def stop(self):
-        self.stopped = True
-        if self.process: # Only relevant for sender subprocess
+        # Set the event first to signal the receiver logic
+        self._stop_event.set()
+        self.stopped = True # Keep this flag for sender logic if needed
+
+        # --- Sender Subprocess Termination (remains the same) ---
+        if self.process:
             try:
                 print(f"Terminating process {self.process.pid}...")
                 self.process.terminate()
@@ -269,9 +282,8 @@ class WorkerThread(QThread):
                 try: self.process.kill(); self.process.wait()
                 except: pass
             self.process = None
+        # --- End Sender Subprocess Termination ---
 
-        # For receiver (direct call), stopping is handled by KeyboardInterrupt in core logic
-        # or by the main GUI thread stopping this worker thread (via QThread.quit/wait).
-        # We still emit the signal to update the GUI status.
-        self.update_signal.emit("Process stop requested by user.")
-        # finished_signal is emitted by the run method completion or exception handler
+        # No need to manually interrupt receiver thread now, the event handles it.
+        # The status update is now handled within run_receiver when stop_event is checked.
+        # self.update_signal.emit("Process stop requested by user.") # Redundant now
