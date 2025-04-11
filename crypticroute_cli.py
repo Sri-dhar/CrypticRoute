@@ -148,7 +148,7 @@ def main():
                 output_path=args.output,
                 key_path=args.key,
                 interface=args.interface,
-                inactivity_timeout=args.timeout,
+                timeout=args.timeout, # Corrected argument name
                 discovery_timeout=args.discovery_timeout,
                 session_paths=session_paths
             )
