@@ -31,7 +31,7 @@ The core idea is to hide data within inconspicuous fields of TCP packets (like s
     *   Automatic retransmission of unacknowledged chunks with configurable timeouts and retries.
 *   **Data Security & Integrity:**
     *   AES-256 CFB encryption using a shared key file.
-    *   MD5 checksum appended to the payload ensures data integrity upon reception.
+    *   SHA256 checksum appended to the payload ensures data integrity upon reception.
 *   **Organized Output:** Creates timestamped session directories (`stealth_output/`) for both sender and receiver, containing logs, configuration, and intermediate data files for debugging and analysis.
 
 ## How it Works (Core Concepts)
@@ -47,7 +47,7 @@ The core idea is to hide data within inconspicuous fields of TCP packets (like s
     *   Receiver responds with a TCP SYN-ACK packet (`Window=0xBEEF`) from a random port.
     *   Sender sends a final TCP ACK packet (`Window=0xF00D`) to the Receiver's *new* response port, confirming the connection.
 4.  **Data Transfer:**
-    *   The payload (File Data + IV + MD5 Checksum) is chunked (default 8 bytes).
+    *   The payload (File Data + IV + SHA256 Checksum) is chunked (default 8 bytes).
     *   Each chunk is embedded into a TCP packet:
         *   First 4 bytes -> Sequence Number
         *   Next 4 bytes -> Acknowledgment Number
@@ -64,7 +64,7 @@ The core idea is to hide data within inconspicuous fields of TCP packets (like s
     *   Receiver stops listening upon receiving the FIN signal or after an inactivity timeout.
 7.  **Reassembly & Verification:**
     *   Receiver reassembles the received chunks in order.
-    *   It verifies the MD5 checksum of the reassembled (IV + encrypted data) payload.
+    *   It verifies the SHA256 checksum of the reassembled (IV + encrypted data) payload.
     *   It decrypts the data using the shared key and the prepended IV.
     *   The final decrypted data is saved to the specified output file.
 <!-- 
@@ -229,7 +229,7 @@ Example structure (`stealth_output/sender_session_YYYYMMDD_HHMMSS/`):
     *   `iv.bin`: IV used for encryption.
     *   `encrypted_data.bin`: Data after encryption (before IV/checksum).
     *   `encrypted_package.bin`: IV + Encrypted Data.
-    *   `md5_checksum.bin`: MD5 checksum generated.
+    *   `SHA256_checksum.bin`: SHA256 checksum generated.
     *   `final_data_package.bin`: The complete payload sent (IV + Encrypted Data + Checksum).
     *   *(Receiver)* `reassembled_data.bin`: Data after reassembly.
     *   *(Receiver)* `data_without_checksum.bin`: Data after checksum verification.
