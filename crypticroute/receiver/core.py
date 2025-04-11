@@ -32,11 +32,12 @@ conf.verb = 0
 class SteganographyReceiver:
     """Handles the core receiving logic including discovery response, handshake, and data processing for a single transfer segment."""
 
-    def __init__(self, key_probe_id_expected, key_response_id, session_paths, key, update_signal=None): # Added update_signal
+    def __init__(self, key_probe_id_expected, key_response_id, session_paths, key, update_signal=None, stop_event=None): # Added stop_event
         """Initialize the receiver state for one discovery/transfer attempt."""
         self.receiver_key_hash_probe_expected = key_probe_id_expected
         self.receiver_key_hash_response = key_response_id
         self.session_paths = session_paths
+        self.stop_event = stop_event # Store the stop event
         self.key = key # Store the decryption key
         self.update_signal = update_signal # Store the optional signal emitter for GUI updates
         self.my_port = random.randint(*RECEIVER_SPORT_RANGE) # Port for sending ACKs/SYN-ACKs
@@ -138,6 +139,7 @@ class SteganographyReceiver:
 
     def process_discovery_probe(self, packet):
         """Process incoming packets during discovery phase. Returns True if valid probe processed, False otherwise."""
+        if self.stop_event and self.stop_event.is_set(): return True # Stop if event is set
         if self.discovery_probe_processed:
             return False # Already processed, stop filter should handle this
 
@@ -174,6 +176,7 @@ class SteganographyReceiver:
         return ack_packet
 
     def send_data_ack(self, seq_num):
+        if self.stop_event and self.stop_event.is_set(): return # Don't send if stopping
         if seq_num in self.ack_sent_chunks: return
         ack_packet = self._create_data_ack_packet(seq_num)
         if not ack_packet: return
@@ -195,6 +198,7 @@ class SteganographyReceiver:
         return syn_ack_packet
 
     def _send_syn_ack(self, incoming_syn_packet):
+        if self.stop_event and self.stop_event.is_set(): return # Don't send if stopping
         syn_ack_packet = self._create_syn_ack_packet(incoming_syn_packet)
         if not syn_ack_packet: return
         log_debug(f"Sending SYN-ACK for connection establishment to {self.sender_ip}:{self.sender_port}")
@@ -317,6 +321,8 @@ class SteganographyReceiver:
         Updates shared_state['last_activity_time'].
         Returns True if FIN processed, False otherwise.
         """
+        if self.stop_event and self.stop_event.is_set(): return True # Signal inner loop to stop
+
         # Update activity time whenever a relevant packet is processed by this handler
         shared_state['last_activity_time'] = time.time()
 
@@ -498,10 +504,10 @@ def reassemble_data(received_chunks_dict, highest_seq_num, logs_dir, chunks_dir,
     return reassembled_data, len(missing_chunks)
 
 # --- Monitor Thread ---
-def monitor_inactivity(stop_event, timeout, shared_state):
+def monitor_inactivity(stop_event, timeout, shared_state): # Use stop_event directly
     """Monitors for inactivity during data reception."""
     log_debug(f"Inactivity monitor started (timeout: {timeout}s).")
-    while not stop_event.is_set():
+    while not stop_event.is_set(): # Check the passed stop_event
         # Ensure last_activity_time exists before checking
         last_activity = shared_state.get('last_activity_time')
         if last_activity is None: # Should not happen after monitor starts, but safety check
@@ -520,14 +526,14 @@ def monitor_inactivity(stop_event, timeout, shared_state):
         if time_to_wait <= 0: time_to_wait = ACK_POLL_INTERVAL / 2 # Prevent negative/zero sleep
 
         # Use stop_event.wait for efficient sleeping interruptible by the main thread
-        if stop_event.wait(timeout=time_to_wait):
+        if stop_event.wait(timeout=time_to_wait): # Use stop_event.wait
             break # Stop event was set, exit loop
 
     log_debug("Inactivity monitor stopped.")
 
 
 # --- High-Level Workflow Function ---
-def receive_file_logic(output_path, key_path, interface, timeout, discovery_timeout, session_paths, update_signal=None): # Added timeout back, added update_signal
+def receive_file_logic(output_path, key_path, interface, timeout, discovery_timeout, session_paths, update_signal=None, stop_event=None): # Added stop_event
     """
     Encapsulates the main logic for discovering and continuously receiving file segments.
     The 'timeout' parameter defines inactivity timeout during data reception.
@@ -556,16 +562,16 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
         return False
 
     # --- Outer Loop: Handles Discovery and Listening for each segment ---
-    stopped_externally = False
-    while not stopped_externally:
+    stopped_externally = False # Primarily for Ctrl+C detection now
+    while not stopped_externally and not (stop_event and stop_event.is_set()): # Check event here
         segment_counter += 1
         log_debug(f"--- Starting Receiver Loop Iteration {segment_counter} ---")
         fin_processed_this_iteration = False
         timed_out_this_iteration = False
 
         # Create a new receiver instance with fresh state for this iteration
-        # Pass the update_signal down to the instance
-        stego = SteganographyReceiver(probe_id_expected, response_id, session_paths, key, update_signal)
+        # Pass the update_signal and stop_event down to the instance
+        stego = SteganographyReceiver(probe_id_expected, response_id, session_paths, key, update_signal, stop_event) # Pass event
 
         # Shared state for this iteration (monitor thread and packet handler)
         shared_state = {
@@ -574,7 +580,7 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
         }
 
         monitor_thread = None
-        stop_monitor_event = threading.Event()
+        # stop_monitor_event = threading.Event() # Removed, use main stop_event
 
         try:
             # --- Phase 1: Discovery (No Timeout) ---
@@ -587,7 +593,7 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
                     filter=f"tcp and dst port {DISCOVERY_PORT}",
                     prn=stego.process_discovery_probe,
                     store=0,
-                    stop_filter=lambda p: stego.discovery_probe_processed or stopped_externally
+                    stop_filter=lambda p: stego.discovery_probe_processed or stopped_externally or (stop_event and stop_event.is_set()) # Check event
                 )
             except KeyboardInterrupt:
                  log_debug("Discovery stopped by user (Ctrl+C).")
@@ -600,16 +606,22 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
                 stopped_externally = True # Treat discovery error as fatal
                 continue # Go to outer finally block
 
+            # Check if stopped after discovery sniff
+            if stop_event and stop_event.is_set():
+                log_debug("Exiting loop due to external stop event after discovery.")
+                stopped_externally = True # Signal outer loop to stop cleanly
+                continue
+
             # If sniff stopped due to Ctrl+C before probe was processed
             if not stego.discovery_probe_processed and stopped_externally:
-                 log_debug("Exiting loop due to external stop during discovery.")
+                 log_debug("Exiting loop due to external stop during discovery (Ctrl+C).")
                  continue # Go to outer finally block
 
             # If sniff finished but no probe was processed (should only happen on error/Ctrl+C now)
             if not stego.discovery_probe_processed:
                  log_debug("Discovery sniff ended unexpectedly without processing a probe. Exiting.")
                  print("\n[ERROR] Discovery ended unexpectedly. Exiting.")
-                 stopped_externally = True
+                 stopped_externally = True # Treat as fatal
                  continue # Go to outer finally block
 
             # --- Phase 2: Main Listening Loop (with Inactivity Timeout) ---
@@ -617,9 +629,9 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
             log_debug(f"Iteration {segment_counter}: Phase 2: Listening for Connection/Data from {stego.discovery_sender_ip}")
             print(f"\n[INFO] Sender discovered at {stego.discovery_sender_ip}. Now listening for connection and data (Inactivity timeout: {timeout}s)...")
 
-            # Start inactivity monitor thread
+            # Start inactivity monitor thread using the main stop_event
             shared_state['last_activity_time'] = time.time() # Reset timer before starting monitor
-            monitor_thread = threading.Thread(target=monitor_inactivity, args=(stop_monitor_event, timeout, shared_state))
+            monitor_thread = threading.Thread(target=monitor_inactivity, args=(stop_event, timeout, shared_state)) # Use main stop_event
             monitor_thread.daemon = True
             monitor_thread.start()
             log_debug("Started inactivity monitor thread.")
@@ -650,8 +662,8 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
                     filter=filter_str,
                     prn=packet_counter_handler,
                     store=0,
-                    # Stop if FIN processed OR external stop OR timeout signaled
-                    stop_filter=lambda p: fin_processed_this_iteration or stopped_externally or shared_state['stop_due_to_timeout']
+                    # Stop if FIN processed OR external stop OR timeout signaled OR stop_event set
+                    stop_filter=lambda p: fin_processed_this_iteration or stopped_externally or shared_state['stop_due_to_timeout'] or (stop_event and stop_event.is_set()) # Check event
                 )
             except KeyboardInterrupt:
                 log_debug("Receiving stopped by user (Ctrl+C).")
@@ -663,8 +675,8 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
                  # Don't set stopped_externally, allow outer loop to continue after stopping monitor
             finally:
                 log_debug(f"Inner sniffing loop for iteration {segment_counter} ended.")
-                # Stop the monitor thread cleanly
-                stop_monitor_event.set()
+                # Stop the monitor thread cleanly (it uses the main stop_event now, so just join)
+                # stop_monitor_event.set() # Removed
                 if monitor_thread and monitor_thread.is_alive():
                     log_debug("Waiting for monitor thread to stop...")
                     monitor_thread.join(1.0) # Wait briefly
@@ -672,16 +684,19 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
                          log_debug("Monitor thread did not stop quickly.")
 
                 # Determine why the loop stopped *after* stopping the monitor
-                if shared_state['stop_due_to_timeout']:
+                if stop_event and stop_event.is_set():
+                    log_debug("Inner loop stopped due to external stop event.")
+                    stopped_externally = True # Ensure outer loop stops
+                elif shared_state['stop_due_to_timeout']:
                     timed_out_this_iteration = True
                     log_debug("Inner loop stopped due to inactivity timeout.")
                     # Message already printed by monitor thread
                 elif fin_processed_this_iteration:
                     log_debug("Inner loop stopped because FIN was processed.")
-                elif stopped_externally:
+                elif stopped_externally: # This now only means Ctrl+C
                     log_debug("Inner loop stopped due to external signal (Ctrl+C).")
                 else:
-                    # This case handles errors caught by the inner try/except
+                    # This case handles errors caught by the inner try/except or other unexpected stops
                     log_debug("Inner loop stopped due to error or unknown reason. Restarting discovery.")
                     print("\n[WARN] Data reception stopped unexpectedly. Restarting discovery...")
 
@@ -694,9 +709,10 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
 
         # Cleanly stop monitor if outer loop exception occurred before stopping it
         finally: # This finally is for the outer try block
-             if monitor_thread and not stop_monitor_event.is_set():
-                  stop_monitor_event.set()
-                  if monitor_thread.is_alive(): monitor_thread.join(0.5)
+             # Monitor uses main stop_event, just ensure thread is joined if it was started
+             if monitor_thread and monitor_thread.is_alive():
+                  log_debug("Ensuring monitor thread is joined after outer loop exception/completion.")
+                  monitor_thread.join(0.5)
 
 
     # --- Post-Outer-Loop Cleanup / Final Stats ---
@@ -715,5 +731,10 @@ def receive_file_logic(output_path, key_path, interface, timeout, discovery_time
     print(f"[INFO] Latest session link: {latest_link_path}")
     log_debug(f"--- Receiver Core Logic Stopped ---")
 
-    # Return True if stopped cleanly (Ctrl+C after at least one loop), False otherwise
-    return stopped_externally and segment_counter > 0
+    # Determine success based on how it stopped
+    if stopped_externally and not (stop_event and stop_event.is_set()): # Stopped by Ctrl+C
+        log_debug(f"Receiver logic finished due to Ctrl+C after {segment_counter} segments. Returning True.")
+        return segment_counter > 0 # True if at least one segment started/finished
+    else: # Stopped by event, timeout, or error
+        log_debug(f"Receiver logic finished due to stop_event, timeout, or error. Returning False.")
+        return False
