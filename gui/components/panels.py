@@ -4,14 +4,16 @@ Main panels for CrypticRoute GUI: Sender and Receiver
 """
 
 import os
+import sys # Import sys
 import time
 import queue
 import random
 import threading
 import netifaces
 import re
+import traceback # Import traceback
 
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, 
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
                              QLineEdit, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
                              QTextEdit, QFileDialog, QGroupBox, QMessageBox, QScrollArea,
                              QFrame, QSplitter)
@@ -19,7 +21,8 @@ from PyQt6.QtCore import Qt, QTimer, QSettings, QEvent
 from PyQt6.QtGui import QFont, QTextCursor
 
 from ..utils.constants import COLORS, DEFAULT_CHUNK_SIZE, DEFAULT_TIMEOUT, DEFAULT_DELAY
-from ..utils.redirector import LogRedirector
+# LogRedirector is used in WorkerThread now
+# from ..utils.redirector import LogRedirector
 from .indicators import HandshakeIndicator, IPExchangePanel, AnimatedStatusLabel
 from .buttons import AnimatedButton
 from .progress_bars import AnimatedProgressBar
@@ -54,7 +57,7 @@ class SenderPanel(QWidget):
         super().__init__(parent)
         self.parent = parent
         self.worker_thread = None
-        self.log_queue = queue.Queue()
+        self.log_queue = queue.Queue() # Sender still uses queue via subprocess stdout
         self.ack_status_window = None # Reference to the separate ACK window
         self.total_chunks_for_ack = 0 # Store total chunks locally
         self.acknowledged_chunks_set = set() # Store received ACKs locally
@@ -64,10 +67,10 @@ class SenderPanel(QWidget):
         self.log_timer.start(50) # Check log queue every 50ms
         self.load_settings()
         self.resizing = False # Flag for log resizing
-        
+
         # Setup source_port for sender
         self.source_port = random.randint(10000, 60000)
-        
+
         # Try to get the local IP address for IP exchange panel
         try:
             # Get the default interface and its IP
@@ -81,7 +84,8 @@ class SenderPanel(QWidget):
                     if not local_ip.startswith('127.'):
                         self.ip_exchange_panel.set_local_ip(f"{local_ip}:{self.source_port}")
                         break
-        except:
+        except Exception as e:
+            print(f"Error getting local IP for sender panel: {e}")
             # If we can't get IP info, just skip it
             pass
 
@@ -90,29 +94,29 @@ class SenderPanel(QWidget):
         if obj.objectName() == "logContainer" or \
         (hasattr(obj, 'text') and obj.text() == "⣿") or \
         obj == self.log_edit:
-            
+
             if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
                 # Start resize operation
                 self.resizing = True
                 self.resize_start_y = event.globalPosition().y()
                 self.resize_start_height = self.log_edit.height()
                 return True
-                
+
             elif event.type() == QEvent.Type.MouseMove and self.resizing:
                 # Calculate new height based on mouse movement
                 delta_y = event.globalPosition().y() - self.resize_start_y
                 new_height = max(100, self.resize_start_height + delta_y)  # Enforce minimum height
-                
+
                 # Apply the new height
                 self.log_edit.setMinimumHeight(int(new_height))
                 self.log_edit.setMaximumHeight(int(new_height))
                 return True
-                
+
             elif event.type() == QEvent.Type.MouseButtonRelease:
                 # End resize operation
                 self.resizing = False
                 return True
-        
+
         # Pass event to parent class if not handled
         return super().eventFilter(obj, event)
 
@@ -274,7 +278,7 @@ class SenderPanel(QWidget):
         # Simplified Connection Status
         self.handshake_indicator = HandshakeIndicator()
         upper_layout.addWidget(self.handshake_indicator)
-        
+
         # Add IP Exchange Panel (new)
         self.ip_exchange_panel = IPExchangePanel()
         upper_layout.addWidget(self.ip_exchange_panel)
@@ -309,7 +313,7 @@ class SenderPanel(QWidget):
         self.log_edit.setMinimumHeight(300)
         log_layout.addWidget(self.log_edit)
         log_group.setLayout(log_layout)
-        
+
         # Create a vertical splitter to allow resizing between top elements and log
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(upper_widget)
@@ -327,7 +331,7 @@ class SenderPanel(QWidget):
                 background-color: {COLORS['primary']};
             }}
         """)
-        
+
         # Add the splitter to the main layout
         main_layout.addWidget(splitter)
 
@@ -365,7 +369,7 @@ class SenderPanel(QWidget):
         except Exception as e:
             self.add_log_message(f"Error populating interfaces: {str(e)}")
 
- 
+
     def browse_input_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select Input File", "", "All Files (*)")
         if file_path:
@@ -479,13 +483,13 @@ class SenderPanel(QWidget):
         if not os.path.exists(input_file):
             QMessageBox.warning(self, "Input Error", f"Input file does not exist: {input_file}")
             return
-            
+
         # Key file validation
         key_file = self.key_file_edit.text().strip()
         if key_file and not os.path.exists(key_file):
             QMessageBox.warning(self, "Input Error", f"Key file does not exist: {key_file}")
             return
-            
+
         # Output directory validation
         output_dir = self.output_dir_edit.text().strip()
         if output_dir and not os.path.exists(output_dir):
@@ -507,7 +511,7 @@ class SenderPanel(QWidget):
             "delay": self.delay_spin.value(),
             "chunk_size": self.chunk_size_spin.value(),
         }
-        
+
         # Get the interface if it's not default
         interface_text = self.interface_combo.currentText()
         if interface_text and interface_text != "default":
@@ -515,7 +519,7 @@ class SenderPanel(QWidget):
             interface = interface_text.split('(')[0].strip()
             args["interface"] = interface
             print(f"Using interface: {interface}")
-        
+
         if key_file:
             args["key_file"] = key_file
         if output_dir:
@@ -621,7 +625,7 @@ class SenderPanel(QWidget):
         else:
             # Check if stopped manually or failed
             current_status = self.status_label.text().lower()
-            if "stopping" in current_status:
+            if "stopping" in current_status or "stopped by user" in current_status:
                 self.status_label.setText("Transmission stopped by user")
                 final_message = "Transmission stopped by user"
             else:
@@ -676,20 +680,20 @@ class ReceiverPanel(QWidget):
         super().__init__(parent)
         self.parent = parent
         self.worker_thread = None
-        self.log_queue = queue.Queue()
-        self.data_queue = queue.Queue()
+        # self.log_queue = queue.Queue() # Receiver now uses direct call, queue not used for logs
+        self.data_queue = queue.Queue() # Still used for data display updates
         self.setup_ui()
-        self.log_timer = QTimer(self)
-        self.log_timer.timeout.connect(self.update_log)
-        self.log_timer.start(25) # Faster log updates for receiver
+        # self.log_timer = QTimer(self) # Log updates handled by direct signal emit
+        # self.log_timer.timeout.connect(self.update_log)
+        # self.log_timer.start(25)
         self.data_timer = QTimer(self)
         self.data_timer.timeout.connect(self.update_data_display)
         self.data_timer.start(50) # Data display updates
         self.load_settings()
-        
+
         # Setup source_port for receiver
         self.source_port = random.randint(10000, 60000)
-        
+
         # Try to get the local IP address for IP exchange panel
         try:
             # Get the default interface and its IP from the interface combo
@@ -697,7 +701,8 @@ class ReceiverPanel(QWidget):
             if "(" in interface_text:
                 local_ip = interface_text.split("(")[1].split(")")[0]
                 self.ip_exchange_panel.set_local_ip(f"{local_ip}:{self.source_port}")
-        except:
+        except Exception as e:
+            print(f"Error getting local IP for receiver panel: {e}")
             # If we can't get IP info, just skip it
             pass
 
@@ -847,7 +852,7 @@ class ReceiverPanel(QWidget):
         # Connection status indicator
         self.handshake_indicator = HandshakeIndicator()
         main_layout.addWidget(self.handshake_indicator)
-        
+
         # Add IP Exchange Panel (new)
         self.ip_exchange_panel = IPExchangePanel()
         main_layout.addWidget(self.ip_exchange_panel)
@@ -873,7 +878,7 @@ class ReceiverPanel(QWidget):
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
         self.log_edit.setFont(QFont("Courier", 9))
-        self.log_edit.setMinimumHeight(400) 
+        self.log_edit.setMinimumHeight(400)
         self.log_edit.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {COLORS['dark']};
@@ -927,7 +932,7 @@ class ReceiverPanel(QWidget):
         panel_layout.addWidget(scroll_area)
         self.setLayout(panel_layout)
 
- 
+
     def populate_interfaces(self):
         self.interface_combo.clear()
         self.interface_combo.addItem("default")
@@ -1001,22 +1006,10 @@ class ReceiverPanel(QWidget):
         # Don't auto-scroll here, let update_log handle it after batch processing
 
     def update_log(self):
-        try:
-            messages = []
-            for _ in range(30): # Process more messages per tick if available
-                if not self.log_queue.empty():
-                    messages.append(self.log_queue.get_nowait())
-                else:
-                    break
-            if messages:
-                for message in messages:
-                    self.add_log_message(message)
-                # Scroll only once after adding the batch
-                self.log_edit.ensureCursorVisible()
-        except queue.Empty:
-            pass
-        except Exception as e:
-            print(f"Error updating log: {e}")
+        # This method now primarily handles messages emitted by update_signal
+        # which includes redirected stdout/stderr from receiver core logic
+        # No queue needed for receiver logs anymore
+        pass # Keep method for potential future use or sender compatibility
 
     def update_data_display(self):
         try:
@@ -1176,7 +1169,9 @@ class ReceiverPanel(QWidget):
         self.refresh_button.setEnabled(False) # Disable refresh while running
 
         self.worker_thread = WorkerThread("receive", args)
-        self.worker_thread.update_signal.connect(self.log_queue.put) # Put raw messages in queue
+        # Connect update_signal directly to add_log_message for receiver
+        self.worker_thread.update_signal.connect(self.add_log_message)
+        # self.worker_thread.update_signal.connect(self.log_queue.put) # No longer needed for receiver
         self.worker_thread.update_signal.connect(self.process_ip_exchange) # Process IP exchange messages
         self.worker_thread.progress_signal.connect(self.update_progress)
         self.worker_thread.status_signal.connect(self.update_status)
@@ -1184,7 +1179,8 @@ class ReceiverPanel(QWidget):
 
         # Connect signals for handshake visualization
         self.worker_thread.handshake_signal.connect(self.update_handshake)
-        # No ACK signal needed for receiver display
+        # Connect the new signal for file reception updates
+        self.worker_thread.file_received_signal.connect(self.display_received_file)
 
         self.worker_thread.start()
 
@@ -1244,16 +1240,10 @@ class ReceiverPanel(QWidget):
             final_message = "Reception completed successfully"
             # Ensure progress is 100%
             self.progress_bar.setValue(100)
-            # Attempt to display the received file content
-            output_file = self.output_file_edit.text().strip()
-            if output_file:
-                # Give file system a moment before reading
-                QTimer.singleShot(200, lambda: self.display_received_file(output_file))
-            else:
-                self.add_log_message("Info: No output file specified, cannot display content.")
+            # File display is now handled by the file_received_signal connection
         else:
             current_status = self.status_label.text().lower()
-            if "stopping" in current_status:
+            if "stopping" in current_status or "stopped by user" in current_status:
                 self.status_label.setText("Reception stopped by user")
                 final_message = "Reception stopped by user"
             else:
