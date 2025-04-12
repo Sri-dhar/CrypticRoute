@@ -64,7 +64,7 @@ class SessionHistoryPanel(QWidget):
         """)
         self.refresh_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.refresh_button.clicked.connect(self.populate_history)
-        
+
         # Align button to the right
         button_layout = QVBoxLayout() # Use a layout to control alignment
         button_layout.addWidget(self.refresh_button, alignment=Qt.AlignmentFlag.AlignRight)
@@ -142,8 +142,30 @@ class SessionHistoryPanel(QWidget):
                 # Adjust format string to include microseconds
                 return datetime.strptime(ts_str, '%Y%m%d_%H%M%S_%f')
             except (ValueError, IndexError):
-                pass
+                 pass
         return None # Return None if parsing fails
+
+    def _extract_ip_from_debug_log(self, log_path):
+        """Parses the debug log to find the sender IP as a fallback."""
+        # Regex to find "Discovery successful. Sender identified: IP:PORT"
+        # or "Set sender IP/Port for connection: IP:PORT"
+        ip_pattern = re.compile(r"(?:Discovery successful\. Sender identified|Set sender IP/Port for connection): (\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+)")
+        try:
+            with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    match = ip_pattern.search(line)
+                    if match:
+                        return match.group(1) # Return the first match found
+        except FileNotFoundError:
+            # Don't print error if file just doesn't exist for a session
+            pass
+        except Exception as e:
+            print(f"Error reading debug log {log_path}: {e}")
+            return None # Return None on error
+
+        # If loop finishes without finding the IP
+        # print(f"Sender IP not found in debug log: {log_path}") # Optional debug print
+        return None # Explicitly return None if not found
 
     def populate_history(self):
         self.history_table.setRowCount(0) # Clear existing rows
@@ -175,7 +197,22 @@ class SessionHistoryPanel(QWidget):
 
                 logs_dir = os.path.join(session_dir, "logs")
                 if not os.path.exists(logs_dir):
-                    continue # Skip if no logs directory
+                    # If logs dir doesn't exist, still try to show basic info from dir name
+                    timestamp = "Unknown Time"
+                    session_sort_key = 0
+                    try:
+                        ts_str = item_name.split('_')[-2] + "_" + item_name.split('_')[-1]
+                        dt_obj = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
+                        timestamp = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
+                        session_sort_key = dt_obj.timestamp()
+                    except (IndexError, ValueError):
+                        pass
+                    session_rows_data.append({
+                        'type': session_type, 'timestamp': timestamp, 'status': "Missing Logs Dir",
+                        'file_output': "N/A", 'ip_addr': "N/A", 'details': "Logs directory not found",
+                        'dir_path': session_dir, 'sort_key': session_sort_key
+                    })
+                    continue # Skip further processing for this session
 
                 # --- Common Session Info (Try completion_info first) ---
                 completion_info = {}
@@ -187,39 +224,58 @@ class SessionHistoryPanel(QWidget):
                     except (json.JSONDecodeError, OSError) as e:
                         print(f"Warning: Could not read/parse {completion_info_path}: {e}")
 
-                # --- Sender Session Processing (Existing Logic) ---
+                # --- Sender Session Processing (Revised Logic) ---
                 if session_type == "Sender":
-                    if not completion_info: # Skip sender session if no completion info
-                         print(f"Skipping sender session {item_name} due to missing completion_info.json")
-                         continue
-
-                    # Extract sender details from completion_info
+                    # Don't skip if completion_info is missing, just show incomplete status
                     timestamp = "Unknown Time"
+                    status = "Unknown"
+                    ip_addr = "N/A"
+                    file_output = "N/A"
+                    details = "N/A"
+                    session_sort_key = 0
+
+                    # Try to get timestamp from directory name as a fallback
                     try:
-                        # Prefer session_end_time if available
-                        if 'session_end_time' in completion_info and isinstance(completion_info['session_end_time'], (int, float)):
-                            timestamp = datetime.fromtimestamp(completion_info['session_end_time']).strftime('%Y-%m-%d %H:%M:%S')
-                        else: # Fallback to directory name
-                            ts_str = item_name.split('_')[-2] + "_" + item_name.split('_')[-1]
-                            dt_obj = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
-                            timestamp = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
-                    except (IndexError, ValueError, KeyError):
-                        pass # Keep "Unknown Time"
+                        ts_str = item_name.split('_')[-2] + "_" + item_name.split('_')[-1]
+                        dt_obj = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
+                        timestamp = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
+                        session_sort_key = dt_obj.timestamp() # Use dir timestamp for sorting if no end_time
+                    except (IndexError, ValueError):
+                        pass # Keep "Unknown Time" and sort_key 0
 
-                    status_raw = completion_info.get('final_status', 'unknown')
-                    status = status_raw.replace('_', ' ').title()
-                    ip_addr = completion_info.get('discovered_receiver_ip', 'N/A')
-                    if ip_addr and 'final_receiver_port' in completion_info:
-                        ip_addr += f":{completion_info.get('final_receiver_port')}"
+                    if completion_info:
+                        # Extract sender details from completion_info if it exists
+                        try:
+                            # Prefer session_end_time if available
+                            if 'session_end_time' in completion_info and isinstance(completion_info['session_end_time'], (int, float)):
+                                end_time = completion_info['session_end_time']
+                                timestamp = datetime.fromtimestamp(end_time).strftime('%Y-%m-%d %H:%M:%S')
+                                session_sort_key = end_time # Use precise end time for sorting
+                        except KeyError:
+                            pass # Keep timestamp from dir name if end_time missing
 
-                    # Placeholder for file output - needs better logging in sender
-                    original_data_path = os.path.join(session_dir, "data", "original_data.bin")
-                    file_output = "Data Sent (check logs)" if os.path.exists(original_data_path) else "No Data Found"
+                        status_raw = completion_info.get('final_status', 'unknown')
+                        status = status_raw.replace('_', ' ').title()
+                        ip_addr = completion_info.get('discovered_receiver_ip', 'N/A')
+                        if ip_addr != 'N/A' and 'final_receiver_port' in completion_info:
+                            ip_addr += f":{completion_info.get('final_receiver_port')}"
 
-                    chunks_gen = completion_info.get('total_chunks_generated', 'N/A')
-                    chunks_ack = completion_info.get('chunks_acknowledged', 'N/A')
-                    ack_rate = completion_info.get('ack_rate_percent', 'N/A')
-                    details = f"Chunks: {chunks_gen} / ACKs: {chunks_ack} ({ack_rate}%)"
+                        # Placeholder for file output - needs better logging in sender
+                        original_data_path = os.path.join(session_dir, "data", "original_data.bin")
+                        file_output = "Data Sent (check logs)" if os.path.exists(original_data_path) else "No Data Found"
+
+                        chunks_gen = completion_info.get('total_chunks_generated', 'N/A')
+                        chunks_ack = completion_info.get('chunks_acknowledged', 'N/A')
+                        ack_rate = completion_info.get('ack_rate_percent', 'N/A')
+                        details = f"Chunks: {chunks_gen} / ACKs: {chunks_ack} ({ack_rate}%)"
+                    else:
+                        # completion_info.json is missing
+                        status = "Incomplete Logs"
+                        details = "Missing completion_info.json"
+                        # Check for data file existence even if logs are incomplete
+                        original_data_path = os.path.join(session_dir, "data", "original_data.bin")
+                        file_output = "Data Sent (check logs)" if os.path.exists(original_data_path) else "No Data Found"
+                        # ip_addr remains "N/A" as it's usually in completion_info
 
                     session_rows_data.append({
                         'type': session_type,
@@ -229,178 +285,124 @@ class SessionHistoryPanel(QWidget):
                         'ip_addr': ip_addr,
                         'details': details,
                         'dir_path': session_dir,
-                        'sort_key': completion_info.get('session_end_time', 0) # Use end time for sorting
+                        'sort_key': session_sort_key
                     })
 
-                # --- Receiver Session Processing (New Logic) ---
+                # --- Receiver Session Processing (Summarized Logic) ---
                 elif session_type == "Receiver":
-                    reassembly_files = []
-                    checksum_info = {}
+                    reassembly_files_info = []
                     checksum_ok_raw = None
                     checksum_ok_str = "N/A"
+                    num_files_received = 0
+                    latest_file_timestamp = None
 
-                    # Find all reassembly logs and the checksum log
+                    # Scan logs directory
                     try:
                         for log_filename in os.listdir(logs_dir):
                             if log_filename.startswith("reassembly_info_") and log_filename.endswith(".json"):
-                                file_path = os.path.join(logs_dir, log_filename)
                                 timestamp_obj = self._parse_reassembly_filename_timestamp(log_filename)
                                 if timestamp_obj:
-                                    reassembly_files.append({'path': file_path, 'timestamp': timestamp_obj, 'filename': log_filename})
+                                    num_files_received += 1
+                                    # Keep track of the latest timestamp among reassembly files
+                                    if latest_file_timestamp is None or timestamp_obj > latest_file_timestamp:
+                                        latest_file_timestamp = timestamp_obj
                             elif log_filename == "checksum_verification.json":
                                 checksum_file_path = os.path.join(logs_dir, log_filename)
                                 if os.path.exists(checksum_file_path):
                                     try:
                                         with open(checksum_file_path, 'r') as cs_f:
-                                            checksum_info = json.load(cs_f)
-                                            checksum_ok_raw = checksum_info.get('match') # True, False, or None
+                                            cs_info = json.load(cs_f)
+                                            checksum_ok_raw = cs_info.get('match') # True, False, or None
                                             checksum_ok_str = "OK" if checksum_ok_raw is True else ("Failed" if checksum_ok_raw is False else "N/A")
                                     except (json.JSONDecodeError, OSError, KeyError) as cs_e:
                                         print(f"Warning: Could not read/parse {checksum_file_path}: {cs_e}")
                     except OSError as e:
                         print(f"Error listing logs directory {logs_dir}: {e}")
-                        continue # Skip this session if logs can't be listed
+                        # Proceed with potentially incomplete info
 
-                    # Get base info from completion_info if available
-                    base_sender_ip = completion_info.get('sender_ip_discovered') or completion_info.get('sender_ip_connected', 'Source N/A')
-                    base_sender_port = completion_info.get('sender_port_connected')
-                    ip_addr = base_sender_ip
-                    if ip_addr != 'Source N/A' and base_sender_port:
-                        ip_addr += f":{base_sender_port}"
-                    
-                    # Determine overall session timestamp (use latest reassembly if completion_info missing)
-                    session_sort_key = completion_info.get('session_end_time', 0)
-
-
-                    if reassembly_files:
-                        # Sort files by timestamp
-                        reassembly_files.sort(key=lambda x: x['timestamp'])
-                        
-                        if session_sort_key == 0 and reassembly_files: # Use latest reassembly time if no end_time
-                             session_sort_key = reassembly_files[-1]['timestamp'].timestamp()
-
-
-                        # Process each reassembled file
-                        for i, file_info in enumerate(reassembly_files):
-                            reassembly_data = {}
-                            try:
-                                with open(file_info['path'], 'r') as rf:
-                                    reassembly_data = json.load(rf)
-                            except (json.JSONDecodeError, OSError) as e:
-                                print(f"Warning: Could not read/parse {file_info['path']}: {e}")
-                                continue # Skip this file if unreadable
-
-                            file_timestamp_str = file_info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
-                            file_time_only_str = file_info['timestamp'].strftime('%H:%M:%S')
-
-                            chunks_rec = reassembly_data.get('received_chunk_count', '?')
-                            # Expected chunks might be in completion_info or need calculation
-                            chunks_exp = completion_info.get('total_chunks_expected', '?') # Or derive if possible
-                            missing_count = reassembly_data.get('missing_chunk_count', None)
-
-                            # Determine Reassembly Status for this file
-                            file_status = "Unknown"
-                            if missing_count == 0:
-                                file_status = "Complete"
-                            elif missing_count is not None and missing_count > 0:
-                                file_status = f"Incomplete ({missing_count} missing)"
-                            
-                            # Placeholder for filename - needs better logging
-                            file_output = f"Received File @ {file_time_only_str}"
-
-                            # Construct Details String
-                            details = f"Rcvd Chunks: {chunks_rec}"
-                            if missing_count is not None:
-                                 details += f" (Missing: {missing_count})"
-
-                            # Add checksum info only to the *last* file's row
-                            if i == len(reassembly_files) - 1:
-                                details += f" | Session Checksum: {checksum_ok_str}"
-
-                            session_rows_data.append({
-                                'type': session_type,
-                                'timestamp': file_timestamp_str, # Use file's timestamp
-                                'status': file_status,
-                                'file_output': file_output,
-                                'ip_addr': ip_addr, # Repeat sender IP for clarity
-                                'details': details,
-                                'dir_path': session_dir,
-                                'sort_key': file_info['timestamp'].timestamp() # Sort by file time
-                            })
-
-                    elif completion_info: # No reassembly files, but completion_info exists (old format?)
-                        # Fallback to old logic using completion_info only
-                        timestamp = "Unknown Time"
+                    # Determine overall session timestamp and sort key
+                    timestamp = "Unknown Time"
+                    session_sort_key = 0
+                    if completion_info and 'session_end_time' in completion_info and isinstance(completion_info['session_end_time'], (int, float)):
+                        session_sort_key = completion_info['session_end_time']
+                        timestamp = datetime.fromtimestamp(session_sort_key).strftime('%Y-%m-%d %H:%M:%S')
+                    elif latest_file_timestamp:
+                        session_sort_key = latest_file_timestamp.timestamp()
+                        timestamp = latest_file_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+                    else: # Fallback to directory name timestamp
                         try:
-                            if 'session_end_time' in completion_info and isinstance(completion_info['session_end_time'], (int, float)):
-                                timestamp = datetime.fromtimestamp(completion_info['session_end_time']).strftime('%Y-%m-%d %H:%M:%S')
-                            else:
-                                ts_str = item_name.split('_')[-2] + "_" + item_name.split('_')[-1]
-                                dt_obj = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
-                                timestamp = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
-                        except (IndexError, ValueError, KeyError):
-                            pass
+                            ts_str = item_name.split('_')[-2] + "_" + item_name.split('_')[-1]
+                            dt_obj = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
+                            timestamp = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
+                            session_sort_key = dt_obj.timestamp()
+                        except (IndexError, ValueError):
+                            pass # Keep "Unknown Time" and sort_key 0
 
+                    # Determine Status
+                    status = "Unknown"
+                    if completion_info:
                         status_raw = completion_info.get('final_status', 'unknown')
                         status = status_raw.replace('_', ' ').title()
-                        
-                        # Check for output file based on completion_info or default name
-                        output_filename = completion_info.get('output_filename')
-                        output_file_path = os.path.join(session_dir, "data", "output_content.txt") # Default guess
-                        if output_filename:
-                             file_output = output_filename
-                        elif os.path.exists(output_file_path):
-                             file_output = os.path.basename(output_file_path) + " (in session dir)"
-                        else:
-                             file_output = "No Output File Found"
-
-                        chunks_rec = completion_info.get('chunks_received', '?')
-                        chunks_exp = completion_info.get('total_chunks_expected', '?')
-                        missing_count = completion_info.get('missing_chunk_count', None)
-                        reassembled_status = "Unknown"
-                        if missing_count == 0: reassembled_status = "Complete"
-                        elif missing_count is not None: reassembled_status = f"Incomplete ({missing_count} missing)"
-
-                        details = f"Rcvd: {chunks_rec}/{chunks_exp} | Reassembly: {reassembled_status} | Checksum: {checksum_ok_str}"
-                        
-                        # Refine status based on checksum if completed
                         if "Completed" in status:
+                             # Refine completed status with checksum info
                              status = f"Completed - Checksum {checksum_ok_str}"
-                        elif reassembled_status != "Complete" and reassembled_status != "Unknown":
-                             status = reassembled_status # Show incomplete status
-
-                        session_rows_data.append({
-                            'type': session_type,
-                            'timestamp': timestamp,
-                            'status': status,
-                            'file_output': file_output,
-                            'ip_addr': ip_addr,
-                            'details': details,
-                            'dir_path': session_dir,
-                            'sort_key': session_sort_key
-                        })
+                        # Consider if other statuses from completion_info are relevant (e.g., Cancelled)
+                    elif num_files_received > 0:
+                         # Infer status if completion_info is missing but files were received
+                         status = f"Received {num_files_received} File(s) (Checksum: {checksum_ok_str})"
                     else:
-                         # No reassembly files and no completion_info
-                         timestamp = "Unknown Time"
-                         try: # Get time from dir name as last resort
-                             ts_str = item_name.split('_')[-2] + "_" + item_name.split('_')[-1]
-                             dt_obj = datetime.strptime(ts_str, '%Y%m%d_%H%M%S')
-                             timestamp = dt_obj.strftime('%Y-%m-%d %H:%M:%S')
-                             session_sort_key = dt_obj.timestamp()
-                         except (IndexError, ValueError):
-                             pass
+                         status = "Incomplete Logs" # No completion_info and no reassembly_info files
 
-                         session_rows_data.append({
-                            'type': session_type,
-                            'timestamp': timestamp,
-                            'status': "Incomplete Logs",
-                            'file_output': "N/A",
-                            'ip_addr': ip_addr,
-                            'details': "Missing completion_info and reassembly logs",
-                            'dir_path': session_dir,
-                            'sort_key': session_sort_key
-                         })
+                    # Determine File/Output string
+                    if num_files_received > 0:
+                        file_output = f"{num_files_received} File(s) Received"
+                    elif completion_info and completion_info.get('output_filename'):
+                        # Fallback for older logs with single output filename in completion_info
+                        file_output = completion_info['output_filename']
+                    else:
+                        file_output = "N/A" # Or "No Files Found"
 
+                    # Determine Details string
+                    details = f"Checksum: {checksum_ok_str}"
+                    # Optionally add chunk info from completion_info if relevant for summary
+                    if completion_info:
+                         chunks_rec = completion_info.get('chunks_received', '?')
+                         chunks_exp = completion_info.get('total_chunks_expected', '?')
+                         if chunks_rec != '?' or chunks_exp != '?':
+                               details += f" | Total Chunks: {chunks_rec}/{chunks_exp}"
+
+                    # Get Sender IP - Try completion_info first, then debug log
+                    ip_addr = None # Initialize ip_addr
+                    if completion_info:
+                        base_sender_ip = completion_info.get('sender_ip_discovered') or completion_info.get('sender_ip_connected')
+                        base_sender_port = completion_info.get('sender_port_connected')
+                        if base_sender_ip: # Check if IP was found in completion_info
+                            ip_addr = base_sender_ip
+                            if base_sender_port:
+                                ip_addr += f":{base_sender_port}"
+
+                    # If IP still not found (is None), try parsing the debug log
+                    if ip_addr is None:
+                        debug_log_path = os.path.join(logs_dir, "receiver_session_debug.log")
+                        extracted_ip = self._extract_ip_from_debug_log(debug_log_path)
+                        if extracted_ip: # Check if extraction was successful
+                            ip_addr = extracted_ip
+
+                    # If IP is still None after checking both sources, set default
+                    if ip_addr is None:
+                        ip_addr = "Source N/A"
+
+                    # Add the summary row for this receiver session
+                    session_rows_data.append({
+                        'type': session_type,
+                        'timestamp': timestamp,
+                        'status': status,
+                        'file_output': file_output,
+                        'ip_addr': ip_addr,
+                        'details': details,
+                        'dir_path': session_dir,
+                        'sort_key': session_sort_key
+                    })
 
         except OSError as e:
              print(f"Error listing directory {STEALTH_OUTPUT_DIR}: {e}")
@@ -453,12 +455,12 @@ class SessionHistoryPanel(QWidget):
         """Opens the session folder associated with the double-clicked row."""
         if not item:
             return
-        
+
         # Retrieve the path stored in the first column (index 0) of the clicked row
         first_item = self.history_table.item(item.row(), 0)
         if not first_item:
              return
-             
+
         session_path = first_item.data(Qt.ItemDataRole.UserRole)
 
         if session_path and os.path.isdir(session_path):
@@ -466,7 +468,7 @@ class SessionHistoryPanel(QWidget):
             try:
                 if sys.platform == "win32":
                     # Use os.startfile for better integration on Windows
-                    os.startfile(session_path) 
+                    os.startfile(session_path)
                 elif sys.platform == "darwin": # macOS
                     subprocess.run(["open", session_path], check=True)
                 else: # Linux and other Unix-like
