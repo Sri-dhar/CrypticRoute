@@ -13,9 +13,16 @@ def find_config_file() -> Optional[str]:
     """
     # 1. Check if running as a bundled executable (PyInstaller)
     if getattr(sys, 'frozen', False):
+        # Prioritize checking next to the executable itself for --onefile mode
+        exe_dir = os.path.dirname(sys.executable)
+        potential_path = os.path.join(exe_dir, "config.toml")
+        if os.path.exists(potential_path):
+            return potential_path
+
+        # Fallback for --onedir mode (data bundled inside _MEIPASS)
         base_path = sys._MEIPASS # type: ignore
     else:
-        # 2. Check relative to the script's directory
+        # 2. Check relative to the script's directory (development mode)
         base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # Project root
 
     potential_path = os.path.join(base_path, "config.toml")
