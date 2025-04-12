@@ -1,0 +1,67 @@
+# Universal Configuration for CrypticRoute
+
+[network]
+# Network settings
+max_chunk_size = 8
+discovery_port = 54321
+discovery_timeout_sender = 30 # Default sender discovery timeout (seconds)
+discovery_timeout_receiver = 60 # Default receiver discovery timeout (seconds)
+ack_wait_timeout = 10 # Seconds sender waits for data ACK
+max_retransmissions = 10 # Max times sender retransmits a data packet
+
+# Handshake/Packet Signatures (Hexadecimal values)
+syn_window = 0xDEAD
+syn_ack_window = 0xBEEF
+final_ack_window = 0xF00D
+data_ack_window = 0xCAFE
+completion_window = 0xFFFF
+discovery_probe_window = 0xFACE
+discovery_response_window = 0xCAFE # Note: Same as DATA_ACK
+
+[transmission]
+# Transmission Parameters
+final_ack_retransmissions = 5
+final_ack_delay = 0.1 # Seconds
+data_dport_range = [10000, 60000] # Range for random destination ports for data packets
+completion_dport_range = [10000, 60000] # Range for random destination ports for completion packets
+ack_poll_interval = 0.1 # How often sender checks if ACK arrived (seconds)
+discovery_probe_interval = 1.0 # Seconds between sender discovery probes
+connection_timeout = 20 # Seconds sender waits for SYN-ACK
+syn_retransmit_interval_initial = 0.5 # Initial seconds between SYN retransmits
+max_syn_sends = 15 # Max SYN packets sender will send before giving up
+syn_retransmit_interval_later = 1.5 # Seconds between SYN retransmits after the first few
+completion_send_count = 10 # How many times sender sends completion packet
+completion_send_delay = 0.2 # Seconds between sender completion packets
+sender_sport_range = [10000, 60000] # Range for random source port for sender
+receiver_sport_range = [10000, 60000] # Range for random source port for receiver ACKs/SYN-ACKs
+discovery_response_send_count = 5 # How many times receiver sends discovery response
+discovery_response_send_delay = 0.1 # Seconds between receiver discovery responses
+data_ack_send_count = 3 # How many times receiver sends data ACK
+data_ack_send_delay = 0.05 # Seconds between receiver data ACKs
+syn_ack_send_count = 5 # How many times receiver sends SYN-ACK
+syn_ack_send_delay = 0.1 # Seconds between receiver SYN-ACKs
+receiver_status_print_interval = 50 # Print receiver status every N packets
+
+[security]
+# Encryption/Integrity
+aes_key_size = 32 # Bytes (for AES-256)
+iv_size = 16 # Bytes (for AES CFB)
+integrity_check_size = 32 # Bytes (SHA-256 checksum)
+
+[output]
+# Output directories and file prefixes
+default_output_dir = "stealth_output"
+sender_session_prefix = "sender_session"
+receiver_session_prefix = "receiver_session"
+logs_subdir = "logs"
+data_subdir = "data"
+chunks_subdir = "chunks"
+raw_chunks_subdir = "raw"
+cleaned_chunks_subdir = "cleaned"
+latest_sender_link = "sender_latest"
+latest_receiver_link = "receiver_latest"
+
+[gui]
+# GUI specific settings
+default_timeout = 120 # Default timeout in seconds for GUI operations
+default_delay = 0.6  # Default delay in seconds for GUI updates/checks

@@ -2,13 +2,18 @@
 """
 Constants for the CrypticRoute GUI
 """
+from crypticroute.config_loader import get_config
+# Import the core chunk size from the common constants, which reads from config
+from crypticroute.common.constants import MAX_CHUNK_SIZE as CORE_CHUNK_SIZE
 
-# Default configuration values
-DEFAULT_CHUNK_SIZE = 8
-DEFAULT_TIMEOUT = 120
-DEFAULT_DELAY = 0.1
+# Default configuration values (read from config.toml with fallbacks)
+# Use the core chunk size as the default for the GUI
+DEFAULT_CHUNK_SIZE = CORE_CHUNK_SIZE
+DEFAULT_TIMEOUT = get_config('gui', 'default_timeout', 120)
+DEFAULT_DELAY = get_config('gui', 'default_delay', 0.1)
 
-# Modern color scheme
+
+# Modern color scheme (kept in code for easier UI development)
 COLORS = {
     'primary': '#2563EB',
     'secondary': '#64748B',
