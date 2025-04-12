@@ -1188,7 +1188,12 @@ class ReceiverPanel(QWidget):
         if self.worker_thread and self.worker_thread.isRunning():
             self.status_label.setText("Stopping reception...")
             self.worker_thread.stop()
-            # Buttons re-enabled in reception_finished
+            # Immediately update button states for better UX,
+            # even if the thread takes time to actually stop.
+            # reception_finished will handle the final state if the thread exits cleanly.
+            self.stop_button.setEnabled(False)
+            self.receive_button.setEnabled(True)
+            self.refresh_button.setEnabled(True)
 
     def update_progress(self, current, total):
         try:
