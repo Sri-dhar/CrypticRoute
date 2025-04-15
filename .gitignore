@@ -191,5 +191,5 @@ TestConfigs/key_*.txt
 
 #PKGBUILD
 PKGBUILD
-# pyproject.toml
-# debian/
+pyproject.toml
+debian/
