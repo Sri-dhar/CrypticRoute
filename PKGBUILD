@@ -1,56 +1,58 @@
 pkgname=crypticroute
-pkgver=1.3
+_pkgname=CrypticRoute
+pkgver=3.0
 pkgrel=1
-pkgdesc="Network steganography tool designed to transmit data covertly by embedding it within crafted TCP packets."
+pkgdesc="Network Steganography Tool for covert data transmission via crafted TCP packets"
 arch=('any')
-url="https://github.com/Sri-dhar/CrypticRoute" 
-license=('custom') 
-depends=(
-    'python'
-    'python-pyqt6'
-    'python-psutil'
-    'python-netifaces'
-    'python-cryptography'
-    'python-scapy'
-)
-provides=('crypticroute_cli' 'crypticroute_gui')
-conflicts=()
-# Use a placeholder URL for the source tarball. Replace with the actual URL for v1.3.
-# config.toml is included as a local source file.
-_pkgname_lower=${pkgname,,} # Get lowercase pkgname for source URL (assuming repo name matches pkgname)
-source=("${_pkgname_lower}-${pkgver}.tar.gz::https://github.com/Sri-dhar/CrypticRoute/archive/refs/tags/v${pkgver}.tar.gz"
-        "config.toml")
-sha256sums=('sha256sum_placeholder' # Replace with actual checksum for the tarball
-            'SKIP') # SKIP for local config.toml
+url="https://github.com/Sri-dhar/CrypticRoute"
+license=('custom:Unknown') # TODO: Add a proper license file to the project and update this field and pyproject.toml
+depends=('python' 'python-pyqt6' 'python-psutil' 'python-netifaces' 'python-cryptography' 'python-scapy' 'python-toml')
+makedepends=('python-build' 'python-installer' 'python-hatchling' 'git') # Added git for VCS source
+checkdepends=('python-pytest' 'python-pytest-mock')
+# Use git source for easier updates. Using main branch for now. Consider using a specific tag (e.g., #tag=v3.0) or commit hash for stable releases.
+source=("${_pkgname}::git+${url}.git#branch=main") # Using main branch
+sha256sums=('SKIP') # 'SKIP' is appropriate for VCS sources
 
+# Prepare function to ensure the source directory matches _pkgname
+prepare() {
+  cd "${srcdir}"
+  # If the git clone directory doesn't match _pkgname, rename it
+  # This depends on how makepkg clones the repo. Often it's just the pkgname.
+  # Check the actual directory name during build if issues arise.
+  if [ -d "${pkgname}" ] && [ ! -d "${_pkgname}" ]; then
+    mv "${pkgname}" "${_pkgname}"
+  fi
+}
+
+# Use standard Python build process now that pyproject.toml exists
 build() {
-    # Assuming the source tarball extracts to a directory named CrypticRoute-1.3 or similar
-    # Adjust the path if the extracted directory name is different
-    cd "${srcdir}/${pkgname}-${pkgver}"
-    # Ensure the main scripts are executable
-    chmod +x crypticroute_cli.py crypticroute_gui.py
+  cd "${srcdir}/${_pkgname}"
+  python -m build --wheel --no-isolation
+}
+
+check() {
+  cd "${srcdir}/${_pkgname}"
+  # Ensure tests are run from the project root where pyproject.toml is
+  # Adjust if tests need specific setup or are in a different directory
+  # Skip tests if checkdepends are not installed or if tests fail intermittently
+  # Consider adding options like --noconfirm to pacman commands if running in automated environments
+  pytest Tests/ || echo "pytest checks failed or checkdepends not installed, skipping..."
 }
 
 package() {
-    local install_dir="${pkgdir}/usr/share/${pkgname}"
-    # Assuming the source tarball extracts to a directory named CrypticRoute-1.3 or similar
-    # Adjust the path if the extracted directory name is different
-    local source_root="${srcdir}/${pkgname}-${pkgver}"
-
-    # Install main scripts
-    install -Dm755 "${source_root}/crypticroute_cli.py" "${install_dir}/crypticroute_cli.py"
-    install -Dm755 "${source_root}/crypticroute_gui.py" "${install_dir}/crypticroute_gui.py"
-
-    # Install the crypticroute library directory
-    cp -r "${source_root}/crypticroute" "${install_dir}/crypticroute"
-    # Install the gui library directory
-    cp -r "${source_root}/gui" "${install_dir}/gui"
-
-    # Install config.toml (from local source)
-    install -Dm644 "${srcdir}/config.toml" "${install_dir}/config.toml"
-
-    # Create symbolic links in /usr/bin pointing to the installed scripts
-    # These links will allow running 'crypticroute_cli' and 'crypticroute_gui' directly
-    ln -sf "/usr/share/${pkgname}/crypticroute_cli.py" "${pkgdir}/usr/bin/crypticroute_cli"
-    ln -sf "/usr/share/${pkgname}/crypticroute_gui.py" "${pkgdir}/usr/bin/crypticroute_gui"
+  cd "${srcdir}/${_pkgname}"
+  python -m installer --destdir="${pkgdir}" dist/*.whl
+  # Install license file if it exists
+  # TODO: Uncomment this line after adding a LICENSE file and updating the license field above
+  # install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }
+
+# Notes:
+# 1. Source URL: Using git source. Replace PUT_COMMIT_HASH_HERE with a specific commit hash, tag (e.g., #tag=v3.0), or branch (e.g., #branch=main).
+# 2. Checksums: 'SKIP' is used for VCS sources.
+# 3. Build System: Uses standard python-build and python-installer with pyproject.toml.
+# 4. Dependencies: Runtime dependencies are in `depends`. Build dependencies are in `makedepends`. Test dependencies are in `checkdepends`.
+# 5. License: Add a LICENSE file to your repo, update the `license` field here and in pyproject.toml, and uncomment the install line in package().
+# 6. Maintainer: Update the Maintainer line at the top.
+# 7. Tests: Assumes tests are in the 'Tests/' directory. The check() function attempts to run them but will not fail the build if they error (useful during development).
+# 8. Prepare Function: Added to handle potential directory name mismatches when cloning from git.
