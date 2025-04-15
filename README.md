@@ -101,6 +101,28 @@ The core idea is to hide data within inconspicuous fields of TCP packets (like s
 pip install PyQt6 psutil netifaces cryptography scapy
 ```
 
+### Using the .deb Package (Debian/Ubuntu)
+
+If a `.deb` package is available in the project releases:
+
+1.  Download the `CrypticRoute_*.deb` file from the project's releases page. <!-- TODO: Add direct link to releases if available -->
+2.  Install the package using `dpkg`:
+    ```bash
+    sudo dpkg -i CrypticRoute_*.deb
+    ```
+3.  If you encounter dependency issues, fix them with:
+    ```bash
+    sudo apt --fix-broken install
+    ```
+
+### Using AUR Helper (Arch Linux)
+
+You can install CrypticRoute from the Arch User Repository (AUR) using an AUR helper like `yay`:
+
+```bash
+yay -S crypticroute
+```
+
 ### Distribution-Specific Notes
 
 *   **Arch Linux / Manjaro:** If encountering `externally-managed-environment` errors with `pip` when using `sudo`, install dependencies system-wide via pacman:
@@ -265,4 +287,3 @@ Example structure (`stealth_output/sender_session_YYYYMMDD_HHMMSS/`):
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or improvements.
-
