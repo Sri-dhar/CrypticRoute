@@ -13,11 +13,9 @@ pkgbase = crypticroute
 	depends = python-scapy
 	provides = crypticroute_cli
 	provides = crypticroute_gui
-	source = dist/crypticroute_cli
-	source = dist/crypticroute_gui
+	source = crypticroute-1.3.tar.gz::https://github.com/Sri-dhar/CrypticRoute/archive/refs/tags/v1.3.tar.gz
 	source = config.toml
-	sha256sums = SKIP
-	sha256sums = SKIP
+	sha256sums = sha256sum_placeholder
 	sha256sums = SKIP
 
 pkgname = crypticroute
