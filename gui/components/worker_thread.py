@@ -11,6 +11,8 @@ import io             # For redirection
 import contextlib     # For redirection
 import traceback    # Ensure traceback is imported
 import threading    # Import threading for Event
+import sys          # To get the current Python executable
+import shutil       # To check if command exists in PATH
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -65,7 +67,31 @@ class WorkerThread(QThread):
         interface = self.args.get("interface")
         output_dir = self.args.get("output_dir")
 
-        cmd = ["python3", "crypticroute_cli.py", "sender", "--input", input_file, "--key", key_file]
+        # Determine how to call the CLI script based on execution context
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.abspath(os.path.join(script_dir, '..', '..'))
+        source_cli_script_path = os.path.join(project_root, 'crypticroute_cli.py')
+
+        if os.path.exists(source_cli_script_path):
+            # Running from source: crypticroute_cli.py exists relative to this script
+            self.update_signal.emit("[INFO] Running from source directory.")
+            # Use sys.executable to ensure the correct Python interpreter is used
+            cmd_base = [sys.executable, source_cli_script_path]
+        else:
+            # Running installed version: crypticroute_cli.py is NOT relative to this script
+            # Look for the installed command in PATH
+            self.update_signal.emit("[INFO] Running installed version, looking for 'crypticroute-cli' in PATH.")
+            cli_executable = shutil.which("crypticroute-cli")
+            if cli_executable:
+                cmd_base = [cli_executable]
+            else:
+                # This indicates a problem with the installation or PATH
+                self.update_signal.emit("[ERROR] Cannot find 'crypticroute-cli' command in PATH. Installation may be broken.")
+                self.finished_signal.emit(False)
+                return # Cannot proceed
+
+        # Construct the full command
+        cmd = cmd_base + ["sender", "--input", input_file, "--key", key_file]
         if interface:
             cmd.extend(["--interface", interface])
         if output_dir:

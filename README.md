@@ -1,4 +1,4 @@
-# CrypticRoute v3 (GUI v2.1) - Network Steganography Tool
+# CrypticRoute - Network Steganography Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.x-blue.svg)](https://www.python.org/)
 <!-- Add other badges if applicable, e.g., build status -->
@@ -99,6 +99,25 @@ The core idea is to hide data within inconspicuous fields of TCP packets (like s
 
 ```bash
 pip install PyQt6 psutil netifaces cryptography scapy
+```
+
+### Using the .deb Package (Debian/Ubuntu)
+
+If a `.deb` package is available in the project releases:
+
+1.  Download the `CrypticRoute_*.deb` file from the project's releases page. <!-- TODO: Add direct link to releases if available -->
+2.  Install the package using `apt`. Navigate to the directory containing the downloaded file in your terminal and run:
+    ```bash
+    sudo apt install ./CrypticRoute_*.deb
+    ```
+    Using `apt` is recommended as it will automatically handle and install any required dependencies.
+
+### Using AUR Helper (Arch Linux)
+
+You can install CrypticRoute from the Arch User Repository (AUR) using an AUR helper like `yay`:
+
+```bash
+yay -S crypticroute
 ```
 
 ### Distribution-Specific Notes
@@ -265,4 +284,3 @@ Example structure (`stealth_output/sender_session_YYYYMMDD_HHMMSS/`):
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or improvements.
-
