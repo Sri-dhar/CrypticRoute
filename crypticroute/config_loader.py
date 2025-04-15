@@ -29,7 +29,12 @@ def find_config_file() -> Optional[str]:
     if os.path.exists(potential_path):
         return potential_path
 
-    # 3. Check in the current working directory (less reliable for executables)
+    # 3. Check standard system location for packaged config
+    potential_path = os.path.join('/usr/share/crypticroute', 'config.toml')
+    if os.path.exists(potential_path):
+        return potential_path
+
+    # 4. Check in the current working directory (less reliable for executables)
     potential_path = os.path.join(os.getcwd(), "config.toml")
     if os.path.exists(potential_path):
         return potential_path
@@ -48,6 +53,7 @@ def find_config_file() -> Optional[str]:
         # __main__ module or __file__ might not be available
         pass
 
+    # 5. Add other locations like /etc/crypticroute/config.toml or ~/.config/crypticroute/config.toml if needed
 
     return None
 
