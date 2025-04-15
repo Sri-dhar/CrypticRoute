@@ -69,7 +69,7 @@ instance/
 
 # Scrapy stuff:
 .scrapy
-
+dist/
 # Sphinx documentation
 docs/_build/
 
@@ -179,3 +179,13 @@ receiver_session_*
 receiver_latest
 *.bin
 *.json
+
+# Build artifacts
+build/
+
+# Output files
+paper_implementation/received_message.txt
+TestConfigs/received.txt
+
+# Test keys (sensitive)
+TestConfigs/key_*.txt
