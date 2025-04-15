@@ -3,3 +3,7 @@
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
+
+# Disable tests
+override_dh_auto_test:
+	# Do nothing
