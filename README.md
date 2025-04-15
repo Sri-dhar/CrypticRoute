@@ -106,14 +106,11 @@ pip install PyQt6 psutil netifaces cryptography scapy
 If a `.deb` package is available in the project releases:
 
 1.  Download the `CrypticRoute_*.deb` file from the project's releases page. <!-- TODO: Add direct link to releases if available -->
-2.  Install the package using `dpkg`:
+2.  Install the package using `apt`. Navigate to the directory containing the downloaded file in your terminal and run:
     ```bash
-    sudo dpkg -i CrypticRoute_*.deb
+    sudo apt install ./CrypticRoute_*.deb
     ```
-3.  If you encounter dependency issues, fix them with:
-    ```bash
-    sudo apt --fix-broken install
-    ```
+    Using `apt` is recommended as it will automatically handle and install any required dependencies.
 
 ### Using AUR Helper (Arch Linux)
 
