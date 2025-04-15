@@ -190,6 +190,6 @@ TestConfigs/received.txt
 TestConfigs/key_*.txt
 
 #PKGBUILD
-PKGBUILD
+# PKGBUILD
 pyproject.toml
 debian/
