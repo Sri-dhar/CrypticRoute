@@ -64,5 +64,5 @@ test = [
 # [tool.hatch.build.targets.sdist]
 # include = ["/crypticroute", "/gui", "/pyproject.toml", "/README.md", "/config.toml"] # Adjust as needed
 
-# [tool.hatch.build.targets.wheel]
-# packages = ["crypticroute", "gui"] # Specify packages to include in the wheel
+[tool.hatch.build.targets.wheel]
+packages = ["crypticroute", "gui"] # Specify packages to include in the wheel
