@@ -1,4 +1,4 @@
-# CrypticRoute v3 (GUI v2.1) - Network Steganography Tool
+# CrypticRoute - Network Steganography Tool
 
 [![Python Version](https://img.shields.io/badge/python-3.x-blue.svg)](https://www.python.org/)
 <!-- Add other badges if applicable, e.g., build status -->
