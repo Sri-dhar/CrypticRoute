@@ -10,7 +10,8 @@ __pycache__/
 .Python
 
 develop-eggs/
-
+build/
+dist/
 downloads/
 stealth_output/
 eggs/
@@ -69,7 +70,6 @@ instance/
 
 # Scrapy stuff:
 .scrapy
-dist/
 # Sphinx documentation
 docs/_build/
 
