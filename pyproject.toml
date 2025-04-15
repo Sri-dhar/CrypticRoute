@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crypticroute"
+version = "3.0" # Match the version in PKGBUILD
+description = "Network Steganography Tool for covert data transmission via crafted TCP packets"
+readme = "README.md"
+requires-python = ">=3.8" # Based on README mentioning 3.8+
+license = { text = "Unknown" } # TODO: Replace with your actual license (e.g., { file = "LICENSE" })
+authors = [
+    { name = "Sridhar Tuli", email = "sridhartuli@gmail.com" }, # TODO: Replace with actual email
+    { name = "Swyam Sharma", email = "swyamsharma13102003@gmail.com" }, # TODO: Replace with actual email
+]
+maintainers = [
+    { name = "Sridhar Tuli", email = "sridhartuli@gmail.com" }, # TODO: Replace with actual email
+    { name = "Swyam Sharma", email = "swyamsharma13102003@gmail.com" }, # TODO: Replace with actual email
+]
+keywords = ["steganography", "network", "tcp", "covert channel", "security", "gui", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta", # Adjust as appropriate
+    "Environment :: Console",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License", # TODO: Change if you choose a different license
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Communications",
+    "Topic :: Security",
+    "Topic :: Security :: Cryptography",
+    "Topic :: System :: Networking",
+]
+dependencies = [
+    "PyQt6",
+    "psutil",
+    "netifaces",
+    "cryptography",
+    "scapy",
+    "toml",
+]
+
+[project.urls]
+Homepage = "https://github.com/Sri-dhar/CrypticRoute"
+Repository = "https://github.com/Sri-dhar/CrypticRoute"
+# Bug-Tracker = "https://github.com/Sri-dhar/CrypticRoute/issues" # Uncomment if desired
+
+[project.scripts]
+crypticroute-cli = "crypticroute_cli:main" # Assumes crypticroute_cli.py has a main() function
+crypticroute-gui = "crypticroute_gui:main" # Assumes crypticroute_gui.py has a main() function
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-mock",
+]
+
+# Configuration for hatchling build backend (optional, defaults are often fine)
+# [tool.hatch.build.targets.sdist]
+# include = ["/crypticroute", "/gui", "/pyproject.toml", "/README.md", "/config.toml"] # Adjust as needed
+
+[tool.hatch.build.targets.wheel]
+# packages = ["crypticroute", "gui"] # Remove 'packages' if using 'include' for everything
+include = ["/crypticroute", "/gui", "/crypticroute_cli.py", "/crypticroute_gui.py"] # Use include instead
