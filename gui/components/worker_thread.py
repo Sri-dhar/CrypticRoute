@@ -80,13 +80,13 @@ class WorkerThread(QThread):
         else:
             # Running installed version: crypticroute_cli.py is NOT relative to this script
             # Look for the installed command in PATH
-            self.update_signal.emit("[INFO] Running installed version, looking for 'crypticroute-cli' in PATH.")
-            cli_executable = shutil.which("crypticroute-cli")
+            self.update_signal.emit("[INFO] Running installed version, looking for 'crypticroute_cli' in PATH.")
+            cli_executable = shutil.which("crypticroute_cli")
             if cli_executable:
                 cmd_base = [cli_executable]
             else:
                 # This indicates a problem with the installation or PATH
-                self.update_signal.emit("[ERROR] Cannot find 'crypticroute-cli' command in PATH. Installation may be broken.")
+                self.update_signal.emit("[ERROR] Cannot find 'crypticroute_cli' command in PATH. Installation may be broken.")
                 self.finished_signal.emit(False)
                 return # Cannot proceed
 
