@@ -188,3 +188,6 @@ TestConfigs/received.txt
 
 # Test keys (sensitive)
 TestConfigs/key_*.txt
+
+#PKGBUILD
+PKGBUILD
