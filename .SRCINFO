@@ -15,6 +15,8 @@ pkgbase = crypticroute
 	provides = crypticroute_gui
 	source = dist/crypticroute_cli
 	source = dist/crypticroute_gui
+	source = config.toml
+	sha256sums = SKIP
 	sha256sums = SKIP
 	sha256sums = SKIP
 

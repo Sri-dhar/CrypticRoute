@@ -1,13 +1,10 @@
-# Maintainer: Your Name <your email@domain.com>
-# Contributor: Cline <AI Assistant>
-
 pkgname=crypticroute
 pkgver=1.3
 pkgrel=1
 pkgdesc="Network steganography tool designed to transmit data covertly by embedding it within crafted TCP packets."
 arch=('any')
-url="https://github.com/Sri-dhar/CrypticRoute" # No project URL provided
-license=('custom') # User indicated no specific license
+url="https://github.com/Sri-dhar/CrypticRoute" 
+license=('custom') 
 depends=(
     'python'
     'python-pyqt6'
@@ -16,25 +13,20 @@ depends=(
     'python-cryptography'
     'python-scapy'
 )
-# Provides the command names
 provides=('crypticroute_cli' 'crypticroute_gui')
-# Conflicts with older versions if they existed under a different name
 conflicts=()
-# The source is the local dist directory containing the binaries
-source=("dist/crypticroute_cli" "dist/crypticroute_gui")
-# No checksums needed for local sources
+source=("dist/crypticroute_cli" "dist/crypticroute_gui" "config.toml")
 noextract=()
-sha256sums=('SKIP' 'SKIP') # SKIP for local files
+sha256sums=('SKIP' 'SKIP' 'SKIP') 
 
 package() {
-    # Install the binaries to /usr/bin
-    install -Dm755 "${srcdir}/crypticroute_cli" "${pkgdir}/usr/bin/crypticroute_cli"
-    install -Dm755 "${srcdir}/crypticroute_gui" "${pkgdir}/usr/bin/crypticroute_gui"
+    local install_dir="${pkgdir}/usr/share/${pkgname}"
+    install -d "${install_dir}"
+    install -Dm755 "${srcdir}/crypticroute_cli" "${install_dir}/crypticroute_cli"
+    install -Dm755 "${srcdir}/crypticroute_gui" "${install_dir}/crypticroute_gui"
+    install -Dm644 "${srcdir}/config.toml" "${install_dir}/config.toml"
 
-    # Note: This PKGBUILD assumes the binaries in 'dist/' are ready to run
-    # and have the necessary Python shebang or are standalone executables.
-    # It also assumes they find their dependencies correctly when installed system-wide.
-    # If the application relies on relative paths to other project files (like config.toml),
-    # those would also need to be installed (e.g., to /usr/share/crypticroute) and the
-    # scripts potentially modified to find them.
+    ln -sf "/usr/share/${pkgname}/crypticroute_cli" "${pkgdir}/usr/bin/crypticroute_cli"
+    ln -sf "/usr/share/${pkgname}/crypticroute_gui" "${pkgdir}/usr/bin/crypticroute_gui"
+
 }
