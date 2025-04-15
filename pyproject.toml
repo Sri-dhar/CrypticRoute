@@ -65,4 +65,5 @@ test = [
 # include = ["/crypticroute", "/gui", "/pyproject.toml", "/README.md", "/config.toml"] # Adjust as needed
 
 [tool.hatch.build.targets.wheel]
-packages = ["crypticroute", "gui"] # Specify packages to include in the wheel
+# packages = ["crypticroute", "gui"] # Remove 'packages' if using 'include' for everything
+include = ["/crypticroute", "/gui", "/crypticroute_cli.py", "/crypticroute_gui.py"] # Use include instead
