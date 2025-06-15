@@ -6,7 +6,6 @@ Launcher script for CrypticRoute GUI
 import sys
 import os
 
-# Add the current directory to path so we can import the GUI package
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:

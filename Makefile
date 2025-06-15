@@ -1,12 +1,5 @@
-# Makefile for the CrypticRoute project
-
-# Use fish shell for commands if available, otherwise default shell
 SHELL := /usr/bin/env fish
-
-# Define Python interpreter
 PYTHON := python3
-
-# Define source files (optional, but good practice)
 SOURCES := $(shell find crypticroute gui Tests -name '*.py')
 
 .PHONY: help install run-cli run-gui test build-docker build-pkg clean

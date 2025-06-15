@@ -7,18 +7,13 @@ from unittest.mock import patch, MagicMock, call
 
 from scapy.all import IP, TCP
 
-# Assuming crypticroute is importable from the project root
-from crypticroute.receiver.core import SteganographyReceiver # Import the real class
+from crypticroute.receiver.core import SteganographyReceiver
 from crypticroute.common.constants import (
     DISCOVERY_PORT, DISCOVERY_PROBE_WINDOW, DISCOVERY_RESPONSE_WINDOW,
     SYN_WINDOW, SYN_ACK_WINDOW, FINAL_ACK_WINDOW, DATA_ACK_WINDOW,
     COMPLETION_WINDOW, RAW_CHUNKS_SUBDIR, CLEANED_CHUNKS_SUBDIR, DATA_SUBDIR
 )
 from crypticroute.common.utils import prepare_key # Use the real key prep
-
-# Use the temp_dirs fixture from conftest.py
-
-# --- Fixtures ---
 
 @pytest.fixture
 def dummy_key_file(temp_dirs):
@@ -29,10 +24,8 @@ def dummy_key_file(temp_dirs):
         f.write(key_content)
     return key_path
 
-# --- Integration Test ---
-
-@patch('crypticroute.receiver.core.send') # Mock network sending
-@patch('crypticroute.receiver.core.log_debug') # Mock logging for cleaner output
+@patch('crypticroute.receiver.core.send')
+@patch('crypticroute.receiver.core.log_debug')
 def test_simulated_receiver_flow(mock_log, mock_send, temp_dirs, dummy_key_file):
     """Simulates the packet flow by calling receiver methods directly."""
 
@@ -82,19 +75,12 @@ def test_simulated_receiver_flow(mock_log, mock_send, temp_dirs, dummy_key_file)
     # 2. Connection SYN
     syn_pkt = IP(src=sender_ip) / TCP(
         sport=sender_port,
-        dport=receiver_port, # Should target the receiver's actual port now? No, SYN comes *to* discovery port or receiver port? Let's assume receiver port based on core logic
+        dport=receiver_port,
         flags='S',
         window=SYN_WINDOW,
         seq=1000
     )
-    # Correction: The SYN *should* still target the receiver's listening port (receiver_port)
-    # However, the process_packet logic checks against discovery_sender_ip first.
-    # Let's refine the SYN packet destination based on how process_packet works.
-    # process_packet checks packet[IP].src == discovery_sender_ip.
-    # It *then* checks for SYN_WINDOW. It doesn't check dport for SYN.
-    # It sets sender_ip/port based on the SYN's src IP/port.
-    # So, dport for SYN doesn't strictly matter for detection, but let's use receiver_port for realism.
-    syn_pkt[TCP].dport = receiver_port # Target the receiver's ephemeral port for SYN
+    syn_pkt[TCP].dport = receiver_port
 
     syn_result = receiver.process_packet(syn_pkt)
     assert syn_result is False
@@ -114,7 +100,7 @@ def test_simulated_receiver_flow(mock_log, mock_send, temp_dirs, dummy_key_file)
     # 3. Final ACK
     final_ack_pkt = IP(src=sender_ip) / TCP(
         sport=sender_port,
-        dport=receiver_port, # Must target the port we sent SYN-ACK from
+        dport=receiver_port, 
         flags='A',
         window=FINAL_ACK_WINDOW,
         ack=sent_syn_ack[TCP].seq + 1 # Acknowledge the SYN-ACK seq
@@ -126,18 +112,15 @@ def test_simulated_receiver_flow(mock_log, mock_send, temp_dirs, dummy_key_file)
 
     # 4. Data Chunks
     total_chunks = 2
-    total_chunks = 2
-    # Ensure data is exactly 8 bytes to split between seq and ack
-    # Ensure data is exactly 8 bytes to split between seq and ack
-    chunk1_data_seq = 1001 # Use smaller fixed int
-    chunk1_data_ack = 2002 # Use smaller fixed int
+    chunk1_data_seq = 1001 
+    chunk1_data_ack = 2002 
     chunk1_data = chunk1_data_seq.to_bytes(4, 'big') + chunk1_data_ack.to_bytes(4, 'big')
     chunk1_seq_num = 1
     chunk1_checksum = binascii.crc32(chunk1_data) & 0xFFFF
     data1_pkt = IP(src=sender_ip, id=chunk1_checksum) / TCP(
         sport=sender_port, dport=receiver_port, flags='S', window=chunk1_seq_num, # Chunk seq num in window
-        seq=chunk1_data_seq, # First part of data in seq field
-        ack=chunk1_data_ack, # Second part of data in ack field
+        seq=chunk1_data_seq,
+        ack=chunk1_data_ack,
         options=[('MSS', total_chunks)]
     )
     data1_result = receiver.process_packet(data1_pkt)
@@ -153,7 +136,6 @@ def test_simulated_receiver_flow(mock_log, mock_send, temp_dirs, dummy_key_file)
     assert sent_data1_ack[TCP].window == DATA_ACK_WINDOW
     mock_send.reset_mock()
 
-    # Ensure data is exactly 8 bytes
     chunk2_data_seq = 3003
     chunk2_data_ack = 4004
     chunk2_data = chunk2_data_seq.to_bytes(4, 'big') + chunk2_data_ack.to_bytes(4, 'big')

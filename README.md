@@ -269,18 +269,3 @@ Example structure (`stealth_output/sender_session_YYYYMMDD_HHMMSS/`):
 *   **scapy:** For packet crafting, sending, and sniffing.
 
 (See `requirements.txt` for exact versions if needed).
-
-## Troubleshooting
-
-*   **Permission Denied:** Ensure you are running the script with `sudo` or have granted the necessary network capabilities (see Permissions section).
-*   **Discovery Fails:**
-    *   Ensure Sender and Receiver are on the same **local network segment** (broadcast domain).
-    *   Verify both are using the **exact same key file**.
-    *   Check that no **firewall** (on either machine or the network) is blocking UDP broadcast traffic or TCP traffic on the discovery port (`54321`) or the ephemeral ports used for response/connection.
-    *   Ensure the correct **network interfaces** are selected in the GUI or specified in the CLI.
-*   **Slow Transfer / Many Retransmissions:** Network congestion or packet loss on the LAN can affect performance. Experiment with the `--delay` option (sender CLI) or Packet Delay (GUI).
-*   **GUI Freezes:** If the GUI becomes unresponsive during long operations, check the console output for errors. Very large file transfers might strain resources.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit pull requests or open issues for bugs, feature requests, or improvements.
